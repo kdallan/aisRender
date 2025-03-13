@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        .connected { color: green; font-weight: bold; }
+        .disconnected { color: red; font-weight: bold; }
+        button { padding: 8px 16px; background: #4CAF50; color: white; 
+                border: none; border-radius: 4px; cursor: pointer; }
+        button:disabled { background: #cccccc; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 4px; 
+             max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Test Page</h1>
+    <p>Server Time: <span id="serverTime"></span></p>
+    <p>Connection URL: <span id="wsUrl"></span></p>
+    
+    <div>
+        <button id="connectBtn">Test Connection</button>
+        <button id="disconnectBtn" disabled>Disconnect</button>
+        <button id="pingBtn" disabled>Send Ping</button>
+    </div>
+    
+    <p>Status: <span id="status" class="disconnected">Not connected</span></p>
+    <p>Messages:</p>
+    <pre id="messages"></pre>
+    
+    <script>
+        const statusEl = document.getElementById('status');
+        const messagesEl = document.getElementById('messages');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const pingBtn = document.getElementById('pingBtn');
+        const serverTimeEl = document.getElementById('serverTime');
+        const wsUrlEl = document.getElementById('wsUrl');
+        
+        let socket = null;
+        
+        // Update server time from /status endpoint
+        fetch('/status')
+            .then(res => res.json())
+            .then(data => {
+                serverTimeEl.textContent = data.time;
+            })
+            .catch(err => console.error('Error:', err));
+        
+        // Connect to WebSocket
+        connectBtn.addEventListener('click', () => {
+            if (socket) return;
+            
+            // Get correct WebSocket protocol based on page protocol
+            const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+            const wsUrl = protocol + window.location.host;
+            wsUrlEl.textContent = wsUrl;
+            
+            statusEl.textContent = 'Connecting...';
+            statusEl.className = '';
+            
+            try {
+                // Create WebSocket connection
+                socket = new WebSocket(wsUrl);
+                
+                // Connection opened
+                socket.onopen = () => {
+                    statusEl.textContent = 'Connected!';
+                    statusEl.className = 'connected';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    pingBtn.disabled = false;
+                    
+                    // Log the successful connection
+                    messagesEl.textContent += '\nConnection established!';
+                };
+                
+                // Listen for messages
+                socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        messagesEl.textContent += '\nReceived: ' + JSON.stringify(data, null, 2);
+                    } catch (e) {
+                        messagesEl.textContent += '\nReceived: ' + event.data;
+                    }
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                };
+                
+                // Connection closed
+                socket.onclose = (event) => {
+                    statusEl.textContent = 'Disconnected (Code: ' + event.code + ')';
+                    statusEl.className = 'disconnected';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    pingBtn.disabled = true;
+                    socket = null;
+                    
+                    messagesEl.textContent += '\nConnection closed';
+                };
+                
+                // Connection error
+                socket.onerror = (error) => {
+                    statusEl.textContent = 'Error occurred!';
+                    statusEl.className = 'disconnected';
+                    messagesEl.textContent += '\nError: ' + error;
+                    console.error('WebSocket error:', error);
+                };
+            } catch (err) {
+                statusEl.textContent = 'Connection failed: ' + err.message;
+                statusEl.className = 'disconnected';
+                messagesEl.textContent += '\nError: ' + err.message;
+            }
+        });
+        
+        // Disconnect WebSocket
+        disconnectBtn.addEventListener('click', () => {
+            if (socket) {
+                socket.close();
+                statusEl.textContent = 'Disconnected by user';
+                statusEl.className = 'disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                pingBtn.disabled = true;
+                socket = null;
+            }
+        });
+        
+        // Send ping
+        pingBtn.addEventListener('click', () => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const pingData = {
+                    type: 'ping',
+                    timestamp: Date.now(),
+                    message: 'Hello from client!'
+                };
+                socket.send(JSON.stringify(pingData));
+                messagesEl.textContent += '\nSent: ' + JSON.stringify(pingData, null, 2);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html>
+

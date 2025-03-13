@@ -1,0 +1,24 @@
+{
+  "name": "aisrender",
+  "version": "1.0.0",
+  "description": "aiShield Render (Web hosting service)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kdallan/aisRender.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kdallan/aisRender/issues"
+  },
+  "homepage": "https://github.com/kdallan/aisRender#readme",
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.1"
+  }
+}
