@@ -88,6 +88,8 @@ class MediaStream {
       }
       if (data.event === "start") {
         console.log("twilio: Start event received: ", data);
+        callSid = data.start.callSid;        
+        console.log('twilio: callSid=', callSid);        
       }
       if (data.event === "media") {
         if (!this.hasSeenMedia) {
@@ -95,12 +97,12 @@ class MediaStream {
           console.log("twilio: Suppressing additional messages...");
           this.hasSeenMedia = true;
         }
-                
-        streamSid = data.streamSid;
-        callSid = data.callSid;
         
-        console.log('twilio: streamSid=', streamSid);
-        console.log('twilio: callSid=', callSid);
+        if( !streamId )
+        {
+        	streamSid = data.streamSid;        
+        	console.log('twilio: streamSid=', streamSid);
+        }
 
         // if (data.media.track == "inbound" || data.media.track == "outbound" )
         {
