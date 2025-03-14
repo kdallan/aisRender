@@ -216,6 +216,9 @@ const setupDeepgram = (mediaStream) => {
     deepgram.keepAlive(); // Keeps the connection alive
   }, 10 * 1000);
 
+  deepgram.addListener(LiveTranscriptionEvents.Open, async () => {
+    console.log("deepgram STT: Connected");
+
     deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
       // Handle multichannel data correctly
       if (data.channels) {
