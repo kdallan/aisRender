@@ -164,26 +164,24 @@ const setupDeepgramWebsocket = (mediaStream) => {
 }
 
 function searchWordInSentence(sentence, word) {
-  // Convert both the sentence and the word to lowercase for case-insensitive comparison
-  const lowerSentence = sentence.toLowerCase();
-  const lowerWord = word.toLowerCase();
+  // If either sentence or word is empty (or only whitespace), return false
+  if (!sentence.trim() || !word.trim()) {
+    return false;
+  }
   
-  // Check if the word exists in the sentence
-  const found = lowerSentence.includes(lowerWord);
-  
-  // Return the result
-  return {
-    found: found,
-    position: found ? lowerSentence.indexOf(lowerWord) : -1
-  };
+  // Perform a case-insensitive search and return the result
+  return sentence.toLowerCase().includes(word.toLowerCase());
 }
 
-async function callHangup( sid ) {
-  const execution = await client.studio.v2
-    .flows("FWe2a7c39cffcbe604f2f158b68aae3b19")
-    .executions( sid );
+async function callHangup( sid )
+{
+	console.log( "callHangup: ", sid );
 
-  console.log(execution.sid);
+  	const execution = await client.studio.v2
+    	.flows("FWe2a7c39cffcbe604f2f158b68aae3b19")
+    	.executions( sid );
+     
+    console.log( "Execution: ", execution );
 }
 
 // Deepgram Streaming Speech to Text
