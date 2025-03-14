@@ -203,7 +203,7 @@ const setupDeepgram = (mediaStream) => {
     encoding: "mulaw",
     sample_rate: 8000,
     channels: 2,
-    multichannel: true,
+    multichannel: false,
     // End of Speech
     no_delay: true,
     interim_results: true,
@@ -220,7 +220,6 @@ const setupDeepgram = (mediaStream) => {
     console.log("deepgram STT: Connected");
 
     deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-    	message.log( JSON.stringify(data, null, 2) );
       const transcript = data.channel.alternatives[0].transcript;
       if (transcript !== "") {
         if (data.is_final) {
@@ -275,7 +274,7 @@ const setupDeepgram = (mediaStream) => {
     });
 
     deepgram.addListener(LiveTranscriptionEvents.Metadata, (data) => {
-      console.log("deepgram STT: metadata received:", JSON.stringify(data, null, 2));
+      console.log("deepgram STT: metadata received:", data);
     });
   });
 
