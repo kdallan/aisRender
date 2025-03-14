@@ -192,7 +192,9 @@ const setupDeepgramWebsocket = (mediaStream) => {
   Deepgram Streaming Speech to Text
 */
 const setupDeepgram = (mediaStream) => {
-  let is_finals = [];
+  // Create separate arrays to track finals for each channel
+  let channelFinals = {};
+  
   const deepgram = deepgramClient.listen.live({
     // Model
     model: "nova-2-phonecall",
@@ -220,17 +222,25 @@ const setupDeepgram = (mediaStream) => {
     console.log("deepgram STT: Connected");
 
     deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-      // Check if the transcript has a channel_index field (indicates which speaker)
-      const channelIndex = data.channel_index !== undefined ? data.channel_index : 0;
-      const transcript = data.channel.alternatives[0].transcript;
+      // Extract the current channel index and total channels
+      const channelIndex = data.channel_index?.[0] ?? 0;
+      const totalChannels = data.channel_index?.[1] ?? 1;
+      
+      // Initialize the finals array for this channel if it doesn't exist yet
+      if (!channelFinals[channelIndex]) {
+        channelFinals[channelIndex] = [];
+      }
+      
+      const transcript = data.channel?.alternatives[0]?.transcript || "";
       
       if (transcript !== "") {
         if (data.is_final) {
-          // You might want to track finals per channel if needed
-          is_finals.push(transcript);
+          // Add to the finals for THIS specific channel
+          channelFinals[channelIndex].push(transcript);
+          
           if (data.speech_final) {
-            const utterance = is_finals.join(" ");
-            is_finals = [];
+            const utterance = channelFinals[channelIndex].join(" ");
+            channelFinals[channelIndex] = []; // Reset only this channel's finals
             console.log(`deepgram STT: [Speech Final] Channel ${channelIndex}: ${utterance}`);
           } else {
             console.log(`deepgram STT: [Is Final] Channel ${channelIndex}: ${transcript}`);
@@ -252,12 +262,16 @@ const setupDeepgram = (mediaStream) => {
       }
     });
 
+    // For UtteranceEnd, check all channels
     deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, (data) => {
-      if (is_finals.length > 0) {
-        console.log("deepgram STT: [Utterance End]");
-        const utterance = is_finals.join(" ");
-        is_finals = [];
-        console.log(`deepgram STT: [Speech Final] ${utterance}`);
+      // Check which channel this utterance end is for
+      const channelIndex = data.channel_index?.[0] ?? 0;
+      
+      if (channelFinals[channelIndex] && channelFinals[channelIndex].length > 0) {
+        console.log(`deepgram STT: [Utterance End] Channel ${channelIndex}`);
+        const utterance = channelFinals[channelIndex].join(" ");
+        channelFinals[channelIndex] = [];
+        console.log(`deepgram STT: [Speech Final] Channel ${channelIndex}: ${utterance}`);
       }
     });
 
