@@ -89,7 +89,8 @@ class MediaStream {
           console.log('twilio: streamSid=', streamSid);
           streamSid = data.streamSid;
         }
-        if (data.media.track == "inbound") {
+        // if (data.media.track == "inbound" || data.media.track == "outbound" )
+        {
           let rawAudio = Buffer.from(data.media.payload, 'base64');
           this.deepgram.send(rawAudio);
         }
