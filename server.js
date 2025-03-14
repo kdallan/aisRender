@@ -159,8 +159,8 @@ const setupDeepgram = (mediaStream) => {
     // Audio
     encoding: "mulaw",
     sample_rate: 8000,
-    channels: 2,
-    multichannel: true,
+    channels: 1,
+    multichannel: false,
     // End of Speech
     no_delay: true,
     interim_results: true,
