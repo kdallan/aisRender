@@ -216,33 +216,68 @@ const setupDeepgram = (mediaStream) => {
     deepgram.keepAlive(); // Keeps the connection alive
   }, 10 * 1000);
 
-  deepgram.addListener(LiveTranscriptionEvents.Open, async () => {
-    console.log("deepgram STT: Connected");
-
     deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-      const transcript = data.channel.alternatives[0].transcript;
-      if (transcript !== "") {
-        if (data.is_final) {
-          is_finals.push(transcript);
-          if (data.speech_final) {
-            const utterance = is_finals.join(" ");
-            is_finals = [];
-            console.log(`deepgram STT: [Speech Final] ${utterance}`);
-          } else {
-            console.log(`deepgram STT:  [Is Final] ${transcript}`);
+      // Handle multichannel data correctly
+      if (data.channels) {
+      	console.log( "Multi-channel" );
+        // Process both channels when multichannel is true
+        data.channels.forEach((channel, index) => {
+          const channelTranscript = channel.alternatives[0].transcript;
+          if (channelTranscript !== "") {
+            if (data.is_final) {
+              is_finals.push(channelTranscript);
+              if (data.speech_final) {
+                const utterance = is_finals.join(" ");
+                is_finals = [];
+                console.log(`deepgram STT: [Speech Final] Channel ${index}: ${utterance}`);
+              } else {
+                console.log(`deepgram STT: [Is Final] Channel ${index}: ${channelTranscript}`);
+              }
+            } else {
+              console.log(`deepgram STT: [Interim Result] Channel ${index}: ${channelTranscript}`);
+              // Your barge-in code...
+              if (speaking) {
+                console.log('twilio: clear audio playback', streamSid);
+                // Handles Barge In
+                const messageJSON = JSON.stringify({
+                  "event": "clear",
+                  "streamSid": streamSid,
+                });
+                mediaStream.connection.sendUTF(messageJSON);
+                mediaStream.deepgramTTSWebsocket.send(JSON.stringify({ 'type': 'Clear' }));
+                speaking = false;
+              }
+            }
           }
-        } else {
-          console.log(`deepgram STT:    [Interim Result] ${transcript}`);
-          if (speaking) {
-            console.log('twilio: clear audio playback', streamSid);
-            // Handles Barge In
-            const messageJSON = JSON.stringify({
-              "event": "clear",
-              "streamSid": streamSid,
-            });
-            mediaStream.connection.sendUTF(messageJSON);
-            mediaStream.deepgramTTSWebsocket.send(JSON.stringify({ 'type': 'Clear' }));
-            speaking = false;
+        });
+      } 
+      // Fallback for single channel data
+      else if (data.channel) {
+      	console.log( "Single-channel" );
+        const transcript = data.channel.alternatives[0].transcript;
+        if (transcript !== "") {
+          if (data.is_final) {
+            is_finals.push(transcript);
+            if (data.speech_final) {
+              const utterance = is_finals.join(" ");
+              is_finals = [];
+              console.log(`deepgram STT: [Speech Final] ${utterance}`);
+            } else {
+              console.log(`deepgram STT: [Is Final] ${transcript}`);
+            }
+          } else {
+            console.log(`deepgram STT: [Interim Result] ${transcript}`);
+            if (speaking) {
+              console.log('twilio: clear audio playback', streamSid);
+              // Handles Barge In
+              const messageJSON = JSON.stringify({
+                "event": "clear",
+                "streamSid": streamSid,
+              });
+              mediaStream.connection.sendUTF(messageJSON);
+              mediaStream.deepgramTTSWebsocket.send(JSON.stringify({ 'type': 'Clear' }));
+              speaking = false;
+            }
           }
         }
       }
