@@ -220,67 +220,33 @@ const setupDeepgram = (mediaStream) => {
     console.log("deepgram STT: Connected");
 
     deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-      // Handle multichannel data correctly
-      if (data.channels) {
-      	console.log( "Multi-channel" );
-        // Process both channels when multichannel is true
-        data.channels.forEach((channel, index) => {
-          const channelTranscript = channel.alternatives[0].transcript;
-          if (channelTranscript !== "") {
-            if (data.is_final) {
-              is_finals.push(channelTranscript);
-              if (data.speech_final) {
-                const utterance = is_finals.join(" ");
-                is_finals = [];
-                console.log(`deepgram STT: [Speech Final] Channel ${index}: ${utterance}`);
-              } else {
-                console.log(`deepgram STT: [Is Final] Channel ${index}: ${channelTranscript}`);
-              }
-            } else {
-              console.log(`deepgram STT: [Interim Result] Channel ${index}: ${channelTranscript}`);
-              // Your barge-in code...
-              if (speaking) {
-                console.log('twilio: clear audio playback', streamSid);
-                // Handles Barge In
-                const messageJSON = JSON.stringify({
-                  "event": "clear",
-                  "streamSid": streamSid,
-                });
-                mediaStream.connection.sendUTF(messageJSON);
-                mediaStream.deepgramTTSWebsocket.send(JSON.stringify({ 'type': 'Clear' }));
-                speaking = false;
-              }
-            }
-          }
-        });
-      } 
-      // Fallback for single channel data
-      else if (data.channel) {
-      	console.log( "Single-channel" );
-        const transcript = data.channel.alternatives[0].transcript;
-        if (transcript !== "") {
-          if (data.is_final) {
-            is_finals.push(transcript);
-            if (data.speech_final) {
-              const utterance = is_finals.join(" ");
-              is_finals = [];
-              console.log(`deepgram STT: [Speech Final] ${utterance}`);
-            } else {
-              console.log(`deepgram STT: [Is Final] ${transcript}`);
-            }
+      // Check if the transcript has a channel_index field (indicates which speaker)
+      const channelIndex = data.channel_index !== undefined ? data.channel_index : 0;
+      const transcript = data.channel.alternatives[0].transcript;
+      
+      if (transcript !== "") {
+        if (data.is_final) {
+          // You might want to track finals per channel if needed
+          is_finals.push(transcript);
+          if (data.speech_final) {
+            const utterance = is_finals.join(" ");
+            is_finals = [];
+            console.log(`deepgram STT: [Speech Final] Channel ${channelIndex}: ${utterance}`);
           } else {
-            console.log(`deepgram STT: [Interim Result] ${transcript}`);
-            if (speaking) {
-              console.log('twilio: clear audio playback', streamSid);
-              // Handles Barge In
-              const messageJSON = JSON.stringify({
-                "event": "clear",
-                "streamSid": streamSid,
-              });
-              mediaStream.connection.sendUTF(messageJSON);
-              mediaStream.deepgramTTSWebsocket.send(JSON.stringify({ 'type': 'Clear' }));
-              speaking = false;
-            }
+            console.log(`deepgram STT: [Is Final] Channel ${channelIndex}: ${transcript}`);
+          }
+        } else {
+          console.log(`deepgram STT: [Interim Result] Channel ${channelIndex}: ${transcript}`);
+          if (speaking) {
+            console.log('twilio: clear audio playback', streamSid);
+            // Handles Barge In
+            const messageJSON = JSON.stringify({
+              "event": "clear",
+              "streamSid": streamSid,
+            });
+            mediaStream.connection.sendUTF(messageJSON);
+            mediaStream.deepgramTTSWebsocket.send(JSON.stringify({ 'type': 'Clear' }));
+            speaking = false;
           }
         }
       }
