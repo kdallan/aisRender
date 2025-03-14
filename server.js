@@ -228,7 +228,8 @@ const setupDeepgram = (mediaStream) => {
         } else {
           console.log(`deepgram STT:    [Interim Result] ${transcript}`);
           
-          if( searchWordInSentence( transcript, "hangup" ))
+          if(  searchWordInSentence( transcript, "hangup" )
+          	|| searchWordInSentence( transcript, "hang up" ))
           {
           	console.log( "hangup detected" );;
         	callHangup( callSid );
