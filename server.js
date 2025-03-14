@@ -1,77 +1,286 @@
-const express = require('express');
-const http = require('http');
-const { WebSocketServer } = require('ws');
-const path = require('path');
+// Import required modules
+const fs = require("fs");
+const http = require("http");
+const path = require("path");
+const dotenv = require("dotenv");
+dotenv.config();
 
-// Create express app and HTTP server
-const app = express();
-const server = http.createServer(app);
+// Twilio
+const HttpDispatcher = require("httpdispatcher");
+const WebSocketServer = require("websocket").server;
+const dispatcher = new HttpDispatcher();
+const wsserver = http.createServer(handleRequest); // Create HTTP server to handle requests
 
-// Serve static files
-app.use(express.static('public'));
+const HTTP_SERVER_PORT = 8080; // Define the server port
+let streamSid = ''; // Variable to store stream session ID
 
-// Status endpoint for health checks
-app.get('/status', (req, res) => {
-  res.json({ 
-    connections: wss.clients.size,
-    time: new Date().toISOString() 
-  });
+const mediaws = new WebSocketServer({
+  httpServer: wsserver,
+  autoAcceptConnections: true,
 });
 
-// Create WebSocket server
-const wss = new WebSocketServer({ server });
+// Deepgram Speech to Text
+const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
+const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY);
+let keepAlive;
 
-// Log active connections
-setInterval(() => {
-  console.log(`Active connections: ${wss.clients.size}`);
-}, 30000);
+// Deepgram Text to Speech Websocket
+const WebSocket = require('ws');
+const deepgramTTSWebsocketURL = 'wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none';
 
-// Handle WebSocket connections
-wss.on('connection', (ws, req) => {
-  console.log('New WebSocket connection established');
-  
-  // Send welcome message
-  ws.send(JSON.stringify({ 
-    type: 'welcome', 
-    message: 'Connected to WebSocket server!',
-    time: new Date().toISOString() 
-  }));
-  
-  // Handle messages
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message);
-      console.log('Received:', data);
-      
-      if (data.type === 'ping') {
-        ws.send(JSON.stringify({ 
-          type: 'pong', 
-          timestamp: Date.now(),
-          message: 'Server received your ping!'
-        }));
-        console.log('Received ping from client');
-      }
-    } catch (e) {
-      console.log('Received (raw):', message.toString());
-    }
-  });
-  
-  // Handle disconnection
-  ws.on('close', () => {
-    console.log('WebSocket connection closed');
-  });
-});
+// Performance Timings
+let ttsStart = 0;
+let firstByte = true;
+let speaking = false;
+let send_first_sentence_input_time = null;
+const chars_to_check = [".", ",", "!", "?", ";", ":"]
 
-// Create public directory for static files
-const fs = require('fs');
-if (!fs.existsSync('public')){
-  fs.mkdirSync('public');
+// Function to handle HTTP requests
+function handleRequest(request, response) {
+  try {
+    dispatcher.dispatch(request, response);
+  } catch (err) {
+    console.error(err);
+  }
 }
 
-// Start server
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log('WebSocket server ready');
+/*
+ Easy Debug Endpoint
+*/
+dispatcher.onGet("/", function (req, res) {
+  console.log('GET /');
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('aiShield Monitor');
 });
 
+/*
+  Websocket Server
+*/
+mediaws.on("connect", function (connection) {
+  console.log("twilio: Connection accepted");
+  new MediaStream(connection);
+});
+
+/*
+  Twilio Bi-directional Streaming
+*/
+class MediaStream {
+  constructor(connection) {
+    this.connection = connection;
+    this.deepgram = setupDeepgram(this);
+    this.deepgramTTSWebsocket = setupDeepgramWebsocket(this);
+    connection.on("message", this.processMessage.bind(this));
+    connection.on("close", this.close.bind(this));
+    this.hasSeenMedia = false;
+
+    this.messages = [];
+    this.repeatCount = 0;
+  }
+
+  // Function to process incoming messages
+  processMessage(message) {
+    if (message.type === "utf8") {
+      let data = JSON.parse(message.utf8Data);
+      if (data.event === "connected") {
+        console.log("twilio: Connected event received: ", data);
+      }
+      if (data.event === "start") {
+        console.log("twilio: Start event received: ", data);
+      }
+      if (data.event === "media") {
+        if (!this.hasSeenMedia) {
+          console.log("twilio: Media event received: ", data);
+          console.log("twilio: Suppressing additional messages...");
+          this.hasSeenMedia = true;
+        }
+        if (!streamSid) {
+          console.log('twilio: streamSid=', streamSid);
+          streamSid = data.streamSid;
+        }
+        if (data.media.track == "inbound") {
+          let rawAudio = Buffer.from(data.media.payload, 'base64');
+          this.deepgram.send(rawAudio);
+        }
+      }
+      if (data.event === "mark") {
+        console.log("twilio: Mark event received", data);
+      }
+      if (data.event === "close") {
+        console.log("twilio: Close event received: ", data);
+        this.close();
+      }
+    } else if (message.type === "binary") {
+      console.log("twilio: binary message received (not supported)");
+    }
+  }
+
+  // Function to handle connection close
+  close() {
+    console.log("twilio: Closed");
+  }
+}
+
+function containsAnyChars(str) {
+  // Convert the string to an array of characters
+  let strArray = Array.from(str);
+  
+  // Check if any character in strArray exists in chars_to_check
+  return strArray.some(char => chars_to_check.includes(char));
+}
+
+/*
+  Deepgram Streaming Text to Speech
+*/
+const setupDeepgramWebsocket = (mediaStream) => {
+  const options = {
+    headers: {
+      Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
+    }
+  };
+  const ws = new WebSocket(deepgramTTSWebsocketURL, options);
+
+  ws.on('open', function open() {
+    console.log('deepgram TTS: Connected');
+  });
+
+  ws.on('message', function incoming(data) {
+    // Handles barge in
+    if (speaking) {
+      try {
+        let json = JSON.parse(data.toString());
+        console.log('deepgram TTS: ', data.toString());
+        return;
+      } catch (e) {
+        // Ignore
+      }
+      if (firstByte) {
+        const end = Date.now();
+        const duration = end - ttsStart;
+        console.warn('\n\n>>> deepgram TTS: Time to First Byte = ', duration, '\n');
+        firstByte = false;
+        if (send_first_sentence_input_time){
+          console.log(`>>> deepgram TTS: Time to First Byte from end of sentence token = `, (end - send_first_sentence_input_time));
+        }
+      }
+      const payload = data.toString('base64');
+      const message = {
+        event: 'media',
+        streamSid: streamSid,
+        media: {
+          payload,
+        },
+      };
+      const messageJSON = JSON.stringify(message);
+
+      // console.log('\ndeepgram TTS: Sending data.length:', data.length);
+      mediaStream.connection.sendUTF(messageJSON);
+    }
+  });
+
+  ws.on('close', function close() {
+    console.log('deepgram TTS: Disconnected from the WebSocket server');
+  });
+
+  ws.on('error', function error(error) {
+    console.log("deepgram TTS: error received");
+    console.error(error);
+  });
+  return ws;
+}
+
+/*
+  Deepgram Streaming Speech to Text
+*/
+const setupDeepgram = (mediaStream) => {
+  let is_finals = [];
+  const deepgram = deepgramClient.listen.live({
+    // Model
+    model: "nova-2-phonecall",
+    language: "en",
+    // Formatting
+    smart_format: true,
+    // Audio
+    encoding: "mulaw",
+    sample_rate: 8000,
+    channels: 1,
+    multichannel: false,
+    // End of Speech
+    no_delay: true,
+    interim_results: true,
+    endpointing: 300,
+    utterance_end_ms: 1000
+  });
+
+  if (keepAlive) clearInterval(keepAlive);
+  keepAlive = setInterval(() => {
+    deepgram.keepAlive(); // Keeps the connection alive
+  }, 10 * 1000);
+
+  deepgram.addListener(LiveTranscriptionEvents.Open, async () => {
+    console.log("deepgram STT: Connected");
+
+    deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
+      const transcript = data.channel.alternatives[0].transcript;
+      if (transcript !== "") {
+        if (data.is_final) {
+          is_finals.push(transcript);
+          if (data.speech_final) {
+            const utterance = is_finals.join(" ");
+            is_finals = [];
+            console.log(`deepgram STT: [Speech Final] ${utterance}`);
+          } else {
+            console.log(`deepgram STT:  [Is Final] ${transcript}`);
+          }
+        } else {
+          console.log(`deepgram STT:    [Interim Result] ${transcript}`);
+          if (speaking) {
+            console.log('twilio: clear audio playback', streamSid);
+            // Handles Barge In
+            const messageJSON = JSON.stringify({
+              "event": "clear",
+              "streamSid": streamSid,
+            });
+            mediaStream.connection.sendUTF(messageJSON);
+            mediaStream.deepgramTTSWebsocket.send(JSON.stringify({ 'type': 'Clear' }));
+            speaking = false;
+          }
+        }
+      }
+    });
+
+    deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, (data) => {
+      if (is_finals.length > 0) {
+        console.log("deepgram STT: [Utterance End]");
+        const utterance = is_finals.join(" ");
+        is_finals = [];
+        console.log(`deepgram STT: [Speech Final] ${utterance}`);
+      }
+    });
+
+    deepgram.addListener(LiveTranscriptionEvents.Close, async () => {
+      console.log("deepgram STT: disconnected");
+      clearInterval(keepAlive);
+      deepgram.requestClose();
+    });
+
+    deepgram.addListener(LiveTranscriptionEvents.Error, async (error) => {
+      console.log("deepgram STT: error received");
+      console.error(error);
+    });
+
+    deepgram.addListener(LiveTranscriptionEvents.Warning, async (warning) => {
+      console.log("deepgram STT: warning received");
+      console.warn(warning);
+    });
+
+    deepgram.addListener(LiveTranscriptionEvents.Metadata, (data) => {
+      console.log("deepgram STT: metadata received:", data);
+    });
+  });
+
+  return deepgram;
+};
+
+wsserver.listen(HTTP_SERVER_PORT, function () {
+  console.log("Server listening on: %s", HTTP_SERVER_PORT);
+});
