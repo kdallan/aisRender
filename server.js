@@ -5,6 +5,15 @@ const path = require("path");
 const dotenv = require("dotenv");
 dotenv.config();
 
+// Download the helper library from https://www.twilio.com/docs/node/install
+const twilio = require("twilio"); // Or, for ESM: import twilio from "twilio";
+
+// Find your Account SID and Auth Token at twilio.com/console
+// and set the environment variables. See http://twil.io/secure
+const accountSid = "AC0f8df3d52746ca7992d4f0b9c74a0b8e"; // process.env.TWILIO_ACCOUNT_SID;
+const authToken = "f5a41d422345b5c6ffce75c12664fcb0"; // process.env.TWILIO_AUTH_TOKEN;
+const client = twilio(accountSid, authToken);
+
 // Twilio
 const HttpDispatcher = require("httpdispatcher");
 const WebSocketServer = require("websocket").server;
@@ -13,6 +22,7 @@ const wsserver = http.createServer(handleRequest); // Create HTTP server to hand
 
 const HTTP_SERVER_PORT = 8080; // Define the server port
 let streamSid = ''; // Variable to store stream session ID
+let callSid = '';
 
 const mediaws = new WebSocketServer({
   httpServer: wsserver,
@@ -85,10 +95,13 @@ class MediaStream {
           console.log("twilio: Suppressing additional messages...");
           this.hasSeenMedia = true;
         }
-        if (!streamSid) {
-          console.log('twilio: streamSid=', streamSid);
-          streamSid = data.streamSid;
-        }
+                
+        streamSid = data.streamSid;
+        callSid = data.callSid;
+        
+        console.log('twilio: streamSid=', streamSid);
+        console.log('twilio: callSid=', callSid);
+
         // if (data.media.track == "inbound" || data.media.track == "outbound" )
         {
           let rawAudio = Buffer.from(data.media.payload, 'base64');
@@ -148,6 +161,29 @@ const setupDeepgramWebsocket = (mediaStream) => {
   return ws;
 }
 
+function searchWordInSentence(sentence, word) {
+  // Convert both the sentence and the word to lowercase for case-insensitive comparison
+  const lowerSentence = sentence.toLowerCase();
+  const lowerWord = word.toLowerCase();
+  
+  // Check if the word exists in the sentence
+  const found = lowerSentence.includes(lowerWord);
+  
+  // Return the result
+  return {
+    found: found,
+    position: found ? lowerSentence.indexOf(lowerWord) : -1
+  };
+}
+
+async function callHangup( sid ) {
+  const execution = await client.studio.v2
+    .flows("FWe2a7c39cffcbe604f2f158b68aae3b19")
+    .executions( sid );
+
+  console.log(execution.sid);
+}
+
 // Deepgram Streaming Speech to Text
 const setupDeepgram = (mediaStream) => {
   let is_finals = [];
@@ -191,6 +227,12 @@ const setupDeepgram = (mediaStream) => {
           }
         } else {
           console.log(`deepgram STT:    [Interim Result] ${transcript}`);
+          
+          if( searchWordInSentence( transcript, "hangup" ))
+          {
+          	console.log( "hangup detected" );;
+        	callHangup( callSid );
+          }
         }
       }
     });
