@@ -31,7 +31,6 @@ const deepgramTTSWebsocketURL = 'wss://api.deepgram.com/v1/speak?encoding=mulaw&
 // Performance Timings
 let ttsStart = 0;
 let firstByte = true;
-let speaking = false;
 let send_first_sentence_input_time = null;
 const chars_to_check = [".", ",", "!", "?", ";", ":"]
 
@@ -44,26 +43,19 @@ function handleRequest(request, response) {
   }
 }
 
-/*
- Easy Debug Endpoint
-*/
 dispatcher.onGet("/", function (req, res) {
   console.log('GET /');
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('aiShield Monitor');
 });
 
-/*
-  Websocket Server
-*/
+// Websocket Server
 mediaws.on("connect", function (connection) {
   console.log("twilio: Connection accepted");
   new MediaStream(connection);
 });
 
-/*
-  Twilio Bi-directional Streaming
-*/
+// Twilio Bi-directional Streaming
 class MediaStream {
   constructor(connection) {
     this.connection = connection;
@@ -128,9 +120,7 @@ function containsAnyChars(str) {
   return strArray.some(char => chars_to_check.includes(char));
 }
 
-/*
-  Deepgram Streaming Text to Speech
-*/
+// Deepgram Streaming Text to Speech
 const setupDeepgramWebsocket = (mediaStream) => {
   const options = {
     headers: {
@@ -144,37 +134,6 @@ const setupDeepgramWebsocket = (mediaStream) => {
   });
 
   ws.on('message', function incoming(data) {
-    // Handles barge in
-    if (speaking) {
-      try {
-        let json = JSON.parse(data.toString());
-        console.log('deepgram TTS: ', data.toString());
-        return;
-      } catch (e) {
-        // Ignore
-      }
-      if (firstByte) {
-        const end = Date.now();
-        const duration = end - ttsStart;
-        console.warn('\n\n>>> deepgram TTS: Time to First Byte = ', duration, '\n');
-        firstByte = false;
-        if (send_first_sentence_input_time){
-          console.log(`>>> deepgram TTS: Time to First Byte from end of sentence token = `, (end - send_first_sentence_input_time));
-        }
-      }
-      const payload = data.toString('base64');
-      const message = {
-        event: 'media',
-        streamSid: streamSid,
-        media: {
-          payload,
-        },
-      };
-      const messageJSON = JSON.stringify(message);
-
-      // console.log('\ndeepgram TTS: Sending data.length:', data.length);
-      mediaStream.connection.sendUTF(messageJSON);
-    }
   });
 
   ws.on('close', function close() {
@@ -188,9 +147,7 @@ const setupDeepgramWebsocket = (mediaStream) => {
   return ws;
 }
 
-/*
-  Deepgram Streaming Speech to Text
-*/
+// Deepgram Streaming Speech to Text
 const setupDeepgram = (mediaStream) => {
   let is_finals = [];
   const deepgram = deepgramClient.listen.live({
@@ -202,8 +159,8 @@ const setupDeepgram = (mediaStream) => {
     // Audio
     encoding: "mulaw",
     sample_rate: 8000,
-    channels: 1,
-    multichannel: false,
+    channels: 2,
+    multichannel: true,
     // End of Speech
     no_delay: true,
     interim_results: true,
@@ -233,17 +190,6 @@ const setupDeepgram = (mediaStream) => {
           }
         } else {
           console.log(`deepgram STT:    [Interim Result] ${transcript}`);
-          if (speaking) {
-            console.log('twilio: clear audio playback', streamSid);
-            // Handles Barge In
-            const messageJSON = JSON.stringify({
-              "event": "clear",
-              "streamSid": streamSid,
-            });
-            mediaStream.connection.sendUTF(messageJSON);
-            mediaStream.deepgramTTSWebsocket.send(JSON.stringify({ 'type': 'Clear' }));
-            speaking = false;
-          }
         }
       }
     });
