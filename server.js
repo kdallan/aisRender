@@ -98,7 +98,7 @@ class MediaStream {
           this.hasSeenMedia = true;
         }
         
-        if( !streamId )
+        if( !streamSid )
         {
         	streamSid = data.streamSid;        
         	console.log('twilio: streamSid=', streamSid);
