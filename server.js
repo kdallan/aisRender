@@ -192,9 +192,7 @@ const setupDeepgramWebsocket = (mediaStream) => {
   Deepgram Streaming Speech to Text
 */
 const setupDeepgram = (mediaStream) => {
-  // Create separate arrays to track finals for each channel
-  let channelFinals = {};
-  
+  let is_finals = [];
   const deepgram = deepgramClient.listen.live({
     // Model
     model: "nova-2-phonecall",
@@ -222,31 +220,20 @@ const setupDeepgram = (mediaStream) => {
     console.log("deepgram STT: Connected");
 
     deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-      // Extract the current channel index and total channels
-      const channelIndex = data.channel_index?.[0] ?? 0;
-      const totalChannels = data.channel_index?.[1] ?? 1;
-      
-      // Initialize the finals array for this channel if it doesn't exist yet
-      if (!channelFinals[channelIndex]) {
-        channelFinals[channelIndex] = [];
-      }
-      
-      const transcript = data.channel?.alternatives[0]?.transcript || "";
-      
+    	message.log( JSON.stringify(data, null, 2) );
+      const transcript = data.channel.alternatives[0].transcript;
       if (transcript !== "") {
         if (data.is_final) {
-          // Add to the finals for THIS specific channel
-          channelFinals[channelIndex].push(transcript);
-          
+          is_finals.push(transcript);
           if (data.speech_final) {
-            const utterance = channelFinals[channelIndex].join(" ");
-            channelFinals[channelIndex] = []; // Reset only this channel's finals
-            console.log(`deepgram STT: [Speech Final] Channel ${channelIndex}: ${utterance}`);
+            const utterance = is_finals.join(" ");
+            is_finals = [];
+            console.log(`deepgram STT: [Speech Final] ${utterance}`);
           } else {
-            console.log(`deepgram STT: [Is Final] Channel ${channelIndex}: ${transcript}`);
+            console.log(`deepgram STT:  [Is Final] ${transcript}`);
           }
         } else {
-          console.log(`deepgram STT: [Interim Result] Channel ${channelIndex}: ${transcript}`);
+          console.log(`deepgram STT:    [Interim Result] ${transcript}`);
           if (speaking) {
             console.log('twilio: clear audio playback', streamSid);
             // Handles Barge In
@@ -262,16 +249,12 @@ const setupDeepgram = (mediaStream) => {
       }
     });
 
-    // For UtteranceEnd, check all channels
     deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, (data) => {
-      // Check which channel this utterance end is for
-      const channelIndex = data.channel_index?.[0] ?? 0;
-      
-      if (channelFinals[channelIndex] && channelFinals[channelIndex].length > 0) {
-        console.log(`deepgram STT: [Utterance End] Channel ${channelIndex}`);
-        const utterance = channelFinals[channelIndex].join(" ");
-        channelFinals[channelIndex] = [];
-        console.log(`deepgram STT: [Speech Final] Channel ${channelIndex}: ${utterance}`);
+      if (is_finals.length > 0) {
+        console.log("deepgram STT: [Utterance End]");
+        const utterance = is_finals.join(" ");
+        is_finals = [];
+        console.log(`deepgram STT: [Speech Final] ${utterance}`);
       }
     });
 
@@ -292,7 +275,7 @@ const setupDeepgram = (mediaStream) => {
     });
 
     deepgram.addListener(LiveTranscriptionEvents.Metadata, (data) => {
-      console.log("deepgram STT: metadata received:", data);
+      console.log("deepgram STT: metadata received:", JSON.stringify(data, null, 2));
     });
   });
 
