@@ -7,173 +7,6 @@ const HttpDispatcher = require("httpdispatcher");
 const WebSocket = require('ws');
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 
-// Audio logger utility
-class AudioLogger {
-  constructor(config) {
-    this.config = config;
-    this.audioFiles = new Map(); // Map to track open file handles
-    this.packetCounter = {
-      inbound: 0,
-      outbound: 0
-    };
-    this.startTime = Date.now();
-    this.totalPackets = {
-      inbound: 0,
-      outbound: 0
-    };
-    
-    // Create audio log directory if needed
-    if (this.config.saveAudioToFile) {
-      if (!fs.existsSync(this.config.audioLogDir)) {
-        try {
-          fs.mkdirSync(this.config.audioLogDir, { recursive: true });
-          logger.info(`Created audio log directory: ${this.config.audioLogDir}`);
-        } catch (error) {
-          logger.error(`Failed to create audio log directory: ${this.config.audioLogDir}`, error);
-          this.config.saveAudioToFile = false; // Disable saving if we can't create the directory
-        }
-      }
-    }
-    
-    // Start periodic summary logging
-    this.summaryInterval = setInterval(() => {
-      this.logSummary();
-    }, 10000); // Log summary every 10 seconds
-  }
-  
-  // Log summary of audio statistics
-  logSummary() {
-    const now = Date.now();
-    const runtimeSeconds = (now - this.startTime) / 1000;
-    
-    if (runtimeSeconds < 1) return; // Don't log if we just started
-    
-    const inboundRate = this.totalPackets.inbound / runtimeSeconds;
-    const outboundRate = this.totalPackets.outbound / runtimeSeconds;
-    
-    logger.info(
-      `Audio summary: Runtime=${runtimeSeconds.toFixed(1)}s, ` +
-      `Inbound=${this.totalPackets.inbound} packets (${inboundRate.toFixed(1)}/s), ` +
-      `Outbound=${this.totalPackets.outbound} packets (${outboundRate.toFixed(1)}/s)`
-    );
-  }
-  
-  // Log audio packet metadata
-  logMetadata(callSid, streamSid, track, payload) {
-    if (!this.config.logAudioMetadata) return;
-    
-    // Increment packet counters
-    this.packetCounter[track]++;
-    this.totalPackets[track]++;
-    
-    // Check if we should log this packet based on sampling rate and track filter
-    const shouldLogTrack = 
-      this.config.audioLogTrack === 'both' || 
-      this.config.audioLogTrack === track;
-    
-    if (shouldLogTrack && this.packetCounter[track] % this.config.audioLogSampleRate === 0) {
-      const timestamp = new Date().toISOString();
-      const payloadSize = payload ? payload.length : 0;
-      
-      logger.info(
-        `[${timestamp}] Audio chunk ${this.packetCounter[track]} received: ` +
-        `track=${track}, size=${payloadSize} bytes, callSid=${callSid}`
-      );
-    }
-  }
-  
-  // Save audio packet to file
-  async saveAudio(callSid, track, payload) {
-    if (!this.config.saveAudioToFile || !payload) return;
-    
-    try {
-      const fileKey = `${callSid}_${track}`;
-      
-      // Create a new file handle if needed
-      if (!this.audioFiles.has(fileKey)) {
-        const timestamp = new Date().toISOString().replace(/:/g, '-');
-        const filename = path.join(
-          this.config.audioLogDir, 
-          `audio_${callSid}_${track}_${timestamp}.raw`
-        );
-        
-        const fileHandle = fs.createWriteStream(filename, { flags: 'a' });
-        this.audioFiles.set(fileKey, { handle: fileHandle, filename });
-        logger.info(`Created new audio log file: ${filename}`);
-      }
-      
-      // Write the buffer to file
-      const fileData = this.audioFiles.get(fileKey);
-      const buffer = Buffer.from(payload, 'base64');
-      fileData.handle.write(buffer);
-      
-    } catch (error) {
-      logger.error(`Error saving audio data for call ${callSid}`, error);
-    }
-  }
-  
-  // Close a specific audio file
-  closeAudioFile(callSid, track) {
-    const fileKey = `${callSid}_${track}`;
-    if (this.audioFiles.has(fileKey)) {
-      try {
-        const fileData = this.audioFiles.get(fileKey);
-        fileData.handle.end();
-        logger.info(`Closed audio log file: ${fileData.filename}`);
-        this.audioFiles.delete(fileKey);
-      } catch (error) {
-        logger.error(`Error closing audio file for ${fileKey}`, error);
-      }
-    }
-  }
-  
-  // Close all audio files for a call
-  closeCallAudioFiles(callSid) {
-    if (!this.config.saveAudioToFile) return;
-    
-    // Find all file keys for this call
-    const keysToClose = [];
-    for (const key of this.audioFiles.keys()) {
-      if (key.startsWith(`${callSid}_`)) {
-        keysToClose.push(key);
-      }
-    }
-    
-    // Close each file
-    for (const key of keysToClose) {
-      try {
-        const fileData = this.audioFiles.get(key);
-        fileData.handle.end();
-        logger.info(`Closed audio log file: ${fileData.filename}`);
-        this.audioFiles.delete(key);
-      } catch (error) {
-        logger.error(`Error closing audio file for ${key}`, error);
-      }
-    }
-  }
-  
-  // Close all open audio files
-  closeAllAudioFiles() {
-    if (!this.config.saveAudioToFile) return;
-    
-    for (const [key, fileData] of this.audioFiles.entries()) {
-      try {
-        fileData.handle.end();
-        logger.info(`Closed audio log file: ${fileData.filename}`);
-      } catch (error) {
-        logger.error(`Error closing audio file for ${key}`, error);
-      }
-    }
-    
-    this.audioFiles.clear();
-    
-    // Clear the summary interval
-    if (this.summaryInterval) {
-      clearInterval(this.summaryInterval);
-    }
-  }
-}
-
 // Configuration management
 const config = {
   // Load configuration with validation and defaults
@@ -212,24 +45,12 @@ const config = {
           multichannel: false,
           no_delay: true,
           interim_results: true,
-          endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 200,
-          utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 600
+          endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
+          utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
         }
       },
       punctuation: {
         chars: [".", ",", "!", "?", ";", ":"]
-      },
-      logging: {
-        // Log audio packets metadata (size, track, timestamp)
-        logAudioMetadata: process.env.LOG_AUDIO_METADATA !== 'false', // Default to true
-        // Log only a sample of audio packets (1 in X packets)
-        audioLogSampleRate: parseInt(process.env.AUDIO_LOG_SAMPLE_RATE) || 100, // Log every 100th packet by default
-        // Track to log ('inbound', 'outbound', or 'both')
-        audioLogTrack: process.env.AUDIO_LOG_TRACK || 'inbound',
-        // Save actual audio to files (DISABLED by default)
-        saveAudioToFile: false, // Explicitly disabled, regardless of environment variable
-        // Directory to save audio files (only used if explicitly enabled in code)
-        audioLogDir: process.env.AUDIO_LOG_DIR || './audio_logs'
       }
     };
   }
@@ -642,7 +463,7 @@ class CallSession {
         
         switch (data.event) {
           case "connected":
-            logger.info("Twilio: Connected event received");
+            logger.info("Twilio: Connected event received: ", JSON.stringify( data ));
             break;
             
           case "start":
@@ -662,7 +483,7 @@ class CallSession {
             
           case "media":
             if (!this.hasSeenMedia) {
-              logger.info("Twilio: First media event received");
+              logger.info("Twilio: First media event received:", JSON.stringify( data ));
               this.hasSeenMedia = true;
             }
             
@@ -673,24 +494,12 @@ class CallSession {
             
             // Process the audio payload
             if (data.media && data.media.payload) {
-              // Log audio packet metadata (with timestamp)
-              this.services.audioLogger.logMetadata(
-                this.callSid, 
-                this.streamSid, 
-                data.media.track, 
-                data.media.payload
-              );
-              
-              // Note: Audio saving is disabled by default
-              // this.services.audioLogger.saveAudio() is not called
-              
-              // Only process audio from the inbound track (what the caller is saying)
-              if (data.media.track === "inbound" | data.media.track === "outbound") {
+              if (data.media.track === "inbound" || data.media.track === "outbound") {
                 try {
                   const payload = data.media.payload;
                   
                   // Calculate expected buffer size (base64 decoding)
-                  const estimatedSize = Math.ceil(payload.length * 0.75);
+                  const estimatedSize = Math.ceil( payload.length * 0.8 );
                   
                   // Get a buffer from the pool
                   const buffer = audioBufferPool.get(estimatedSize);
@@ -734,12 +543,6 @@ class CallSession {
 
   _handleClose() {
     logger.info("Twilio: Connection closed");
-    
-    // Close any open audio log files for this call
-    if (this.callSid) {
-      this.services.audioLogger.closeCallAudioFiles(this.callSid);
-    }
-    
     this._cleanup();
   }
 
@@ -859,8 +662,7 @@ class VoiceServer {
     this.services = {
       config: this.config,
       twilioService: new TwilioService(this.config.twilio),
-      textUtils: new TextUtils(this.config.punctuation),
-      audioLogger: new AudioLogger(this.config.logging)
+      textUtils: new TextUtils(this.config.punctuation)
     };
     
     // Set up HTTP server and dispatcher
@@ -942,9 +744,6 @@ class VoiceServer {
       for (const session of this.sessions.values()) {
         session._cleanup();
       }
-      
-      // Close all audio log files
-      this.services.audioLogger.closeAllAudioFiles();
       
       // Close the HTTP server
       this.httpServer.close(() => {
