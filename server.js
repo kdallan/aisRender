@@ -433,27 +433,24 @@ class CallSession {
         }
     }
     
-    _hasAudioEnergy(base64Payload, threshold = 0.1) {
+    _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0xE7) {
       try {
         const binary = Buffer.from(base64Payload, "base64");
-        if (binary.length < 10) return true; // small packets processed immediately
+        if (binary.length < 10) return true;
 
-        const MULAW_SILENCE_BYTE = 0xFF;
         let nonSilenceCount = 0;
         let samples = 0;
 
-        // Sample every nth byte (every 2nd or 4th byte for efficiency)
-        for (let i = 0; i < binary.length; i += 4) {
+        for (let i = 0; i < binary.length; i += 15) { // adjust sampling as needed
           samples++;
-          if (binary[i] !== MULAW_SILENCE_BYTE) {
-            nonSilenceCount++;
-          }
+          const byte = binary[i];
+          if (byte < mulawThreshold) nonSilenceCount++;
         }
 
         const ratio = nonSilenceCount / samples;
         return ratio > threshold;
       } catch (error) {
-        logger.debug("Error checking audio energy, processing anyway", error);
+        logger.debug("Error checking audio energy", error);
         return true;
       }
     }
