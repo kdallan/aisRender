@@ -463,7 +463,7 @@ class CallSession {
         
         switch (data.event) {
           case "connected":
-            logger.info("Twilio: Connected event received: ", JSON.stringify( data ));
+            logger.info("Twilio: Connected event received");
             break;
             
           case "start":
@@ -483,7 +483,7 @@ class CallSession {
             
           case "media":
             if (!this.hasSeenMedia) {
-              logger.info("Twilio: First media event received:", JSON.stringify( data ));
+              logger.info("Twilio: First media event received");
               this.hasSeenMedia = true;
             }
             
@@ -494,12 +494,13 @@ class CallSession {
             
             // Process the audio payload
             if (data.media && data.media.payload) {
+              // Only process audio from the inbound track (what the caller is saying)
               if (data.media.track === "inbound" || data.media.track === "outbound") {
                 try {
                   const payload = data.media.payload;
                   
                   // Calculate expected buffer size (base64 decoding)
-                  const estimatedSize = Math.ceil( payload.length * 0.8 );
+                  const estimatedSize = Math.ceil(payload.length * 0.75);
                   
                   // Get a buffer from the pool
                   const buffer = audioBufferPool.get(estimatedSize);
