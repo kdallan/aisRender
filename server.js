@@ -72,7 +72,7 @@ const config = {
       },
       deepgram: {
         apiKey: process.env.DEEPGRAM_API_KEY,
-        ttsWebsocketURL: process.env.DEEPGRAM_TTS_WS_URL || 
+        ttsWebsocketURL: process.env.DEEPGRAM_TTS_WS_URL ||
                         'wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none',
         sttConfig: {
           model: process.env.DEEPGRAM_MODEL || "nova-2-phonecall",
@@ -84,11 +84,11 @@ const config = {
           multichannel: false,
           no_delay: true,
           interim_results: true,
-          endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
-          utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
+          endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 280,
+          utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 900
         },
-        // Throttle interval in ms for sending audio packets (default: 50ms)
-        throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 50
+        // Throttle interval in ms for sending audio packets (default: 75ms)
+        throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 75
       },
       punctuation: {
         chars: [".", ",", "!", "?", ";", ":"]
@@ -517,7 +517,7 @@ class CallSession {
           }
           
           if (data.media && data.media.payload) {
-            if (data.media.track === "inbound") {
+            if (data.media.track === "inbound" || data.media.track === "outbound") {
               this.inboundPackets++;
               
               try {
@@ -591,8 +591,13 @@ class CallSession {
   }
 
   _flushAudioBuffer() {
-    if (this.audioAccumulator.length === 0) {
+    // Clear the timer immediately to prevent overlapping flushes.
+    if (this.audioAccumulatorTimer) {
+      clearTimeout(this.audioAccumulatorTimer);
       this.audioAccumulatorTimer = null;
+    }
+    
+    if (this.audioAccumulator.length === 0) {
       return;
     }
     
@@ -605,9 +610,9 @@ class CallSession {
       // Clear the accumulator and reset the accumulated size.
       this.audioAccumulator = [];
       this.audioAccumulatorSize = 0;
-      this.audioAccumulatorTimer = null;
     } else {
       logger.warn("Deepgram is not connected when attempting to flush audio; rescheduling flush.");
+      // Set a new timer after clearing the previous one.
       this.audioAccumulatorTimer = setTimeout(this._flushAudioBuffer, this.throttleInterval);
     }
   }
@@ -615,36 +620,23 @@ class CallSession {
   _hasAudioEnergy(base64Payload) {
     try {
       const binary = Buffer.from(base64Payload, 'base64');
-      if (binary.length < 10) return true;
-      
+      if (binary.length < 10) return true; // Process very small packets
+
+      const silenceValues = [0x7F, 0xFF];
       let nonSilenceCount = 0;
-      const packetLength = binary.length;
-      const samplePositions = [
-        0,
-        Math.floor(packetLength * 0.1),
-        Math.floor(packetLength * 0.2),
-        Math.floor(packetLength * 0.3),
-        Math.floor(packetLength * 0.4),
-        Math.floor(packetLength * 0.5),
-        Math.floor(packetLength * 0.6),
-        Math.floor(packetLength * 0.7),
-        Math.floor(packetLength * 0.8),
-        Math.floor(packetLength * 0.9)
-      ];
-      
-      for (const position of samplePositions) {
-        for (let i = 0; i < 5; i++) {
-          const index = position + i;
-          if (index < packetLength) {
-            const byte = binary[index];
-            if (byte !== 0x7F && byte !== 0xFF) {
-              nonSilenceCount++;
-            }
-          }
+      let samples = 0;
+
+      // Sample every 4th byte in the buffer
+      for (let i = 0; i < binary.length; i += 4) {
+        samples++;
+        if (!silenceValues.includes(binary[i])) {
+          nonSilenceCount++;
         }
       }
-      
-      return nonSilenceCount > 2;
+
+      const ratio = nonSilenceCount / samples;
+      // Consider the packet as containing audio if more than 10% of samples are non-silence
+      return ratio > 0.1;
     } catch (error) {
       logger.debug("Error checking audio energy, processing anyway", error);
       return true;
