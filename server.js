@@ -552,7 +552,17 @@ class CallSession {
   }
 
   async _handleHangup(customPhrase) {
-    if (!this.active || !this.callSid) return;
+  	logger.info( "_handleHangup" );
+      
+    if (!this.active) {
+    	logger.info( "!this.active" );
+     	return;
+    }
+    
+    if (!this.callSid) {
+    	logger.info( "!this.callSid" );
+        return;
+    }
     
     try {
       // If a custom phrase is provided, say it before hanging up
