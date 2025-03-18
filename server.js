@@ -306,10 +306,21 @@ class DeepgramSTTService {
       this.reconnectAttempts = 0;
       
       this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-        const transcript = data.channel?.alternatives?.[0]?.transcript;
-        if (!transcript) return;
-        
-        if (data.is_final) {
+        try {
+          // Process interim results immediately, prioritizing real-time output
+          if (!data.is_final) {
+            const transcript = data.channel?.alternatives?.[0]?.transcript;
+            if (transcript) {
+              // Immediately call handler for interim results
+              this.onTranscript && this.onTranscript(transcript, false);
+            }
+            return;
+          }
+          
+          // For final transcripts
+          const transcript = data.channel?.alternatives?.[0]?.transcript;
+          if (!transcript) return;
+          
           this.isFinals.push(transcript);
           if (data.speech_final) {
             const utterance = this.isFinals.join(" ");
@@ -318,8 +329,8 @@ class DeepgramSTTService {
           } else {
             this.onTranscript && this.onTranscript(transcript, true);
           }
-        } else {
-          this.onTranscript && this.onTranscript(transcript, false);
+        } catch (error) {
+          logger.error("Error processing transcript data", error);
         }
       });
       
@@ -597,11 +608,12 @@ class CallSession {
     if (!this.active || this.hangupInitiated) return; // Don't process if hangup already initiated
     
     try {
-      // Log based on transcript type, but always process
+      // Always log with INFO level for visibility, whether interim or final
       if (isFinal) {
         logger.info(`Deepgram STT: [Final] ${transcript}`);
       } else {
-        logger.debug(`Deepgram STT: [Interim] ${transcript}`);
+        // Show interim results at INFO level so they're always visible
+        logger.info(`Deepgram STT: [Interim] ${transcript}`);
       }
       
       // Process all transcripts in real-time, even interim results
