@@ -227,9 +227,15 @@ class DeepgramSTTService {
             this.onTranscript(utterance, true);
           }
         } else {
+          // Log and process each final segment
           logger.debug(`Deepgram STT: [Is Final] ${transcript}`);
+          
+          if (this.onTranscript) {
+            this.onTranscript(transcript, true);
+          }
         }
       } else {
+        // Log and process all interim results
         logger.debug(`Deepgram STT: [Interim Result] ${transcript}`);
         
         if (this.onTranscript) {
@@ -505,6 +511,13 @@ class CallSession {
     if (!this.active) return;
     
     try {
+      // Always log all transcripts, including interim results
+      if (isFinal) {
+        logger.info(`Deepgram STT: [Final] ${transcript}`);
+      } else {
+        logger.info(`Deepgram STT: [Interim] ${transcript}`);
+      }
+      
       // Check for hangup command in the transcript
       if (this.services.textUtils.searchWordInSentence(transcript, "hangup") || 
           this.services.textUtils.searchWordInSentence(transcript, "hang up")) {
