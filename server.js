@@ -12,6 +12,15 @@ class AudioLogger {
   constructor(config) {
     this.config = config;
     this.audioFiles = new Map(); // Map to track open file handles
+    this.packetCounter = {
+      inbound: 0,
+      outbound: 0
+    };
+    this.startTime = Date.now();
+    this.totalPackets = {
+      inbound: 0,
+      outbound: 0
+    };
     
     // Create audio log directory if needed
     if (this.config.saveAudioToFile) {
@@ -25,19 +34,52 @@ class AudioLogger {
         }
       }
     }
+    
+    // Start periodic summary logging
+    this.summaryInterval = setInterval(() => {
+      this.logSummary();
+    }, 10000); // Log summary every 10 seconds
+  }
+  
+  // Log summary of audio statistics
+  logSummary() {
+    const now = Date.now();
+    const runtimeSeconds = (now - this.startTime) / 1000;
+    
+    if (runtimeSeconds < 1) return; // Don't log if we just started
+    
+    const inboundRate = this.totalPackets.inbound / runtimeSeconds;
+    const outboundRate = this.totalPackets.outbound / runtimeSeconds;
+    
+    logger.info(
+      `Audio summary: Runtime=${runtimeSeconds.toFixed(1)}s, ` +
+      `Inbound=${this.totalPackets.inbound} packets (${inboundRate.toFixed(1)}/s), ` +
+      `Outbound=${this.totalPackets.outbound} packets (${outboundRate.toFixed(1)}/s)`
+    );
   }
   
   // Log audio packet metadata
   logMetadata(callSid, streamSid, track, payload) {
     if (!this.config.logAudioMetadata) return;
     
-    const timestamp = new Date().toISOString();
-    const payloadSize = payload ? payload.length : 0;
+    // Increment packet counters
+    this.packetCounter[track]++;
+    this.totalPackets[track]++;
     
-    logger.info(
-      `[${timestamp}] Audio chunk received: callSid=${callSid}, ` + 
-      `streamSid=${streamSid}, track=${track}, size=${payloadSize} bytes`
-    );
+    // Check if we should log this packet based on sampling rate and track filter
+    const shouldLogTrack = 
+      this.config.audioLogTrack === 'both' || 
+      this.config.audioLogTrack === track;
+    
+    if (shouldLogTrack && this.packetCounter[track] % this.config.audioLogSampleRate === 0) {
+      const timestamp = new Date().toISOString();
+      const payloadSize = payload ? payload.length : 0;
+      
+      logger.info(
+        `[${timestamp}] Audio chunk ${this.packetCounter[track]} received: ` +
+        `track=${track}, size=${payloadSize} bytes, callSid=${callSid}`
+      );
+    }
   }
   
   // Save audio packet to file
@@ -124,6 +166,11 @@ class AudioLogger {
     }
     
     this.audioFiles.clear();
+    
+    // Clear the summary interval
+    if (this.summaryInterval) {
+      clearInterval(this.summaryInterval);
+    }
   }
 }
 
@@ -165,8 +212,8 @@ const config = {
           multichannel: false,
           no_delay: true,
           interim_results: true,
-          endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
-          utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
+          endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 200,
+          utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 600
         }
       },
       punctuation: {
@@ -175,6 +222,10 @@ const config = {
       logging: {
         // Log audio packets metadata (size, track, timestamp)
         logAudioMetadata: process.env.LOG_AUDIO_METADATA !== 'false', // Default to true
+        // Log only a sample of audio packets (1 in X packets)
+        audioLogSampleRate: parseInt(process.env.AUDIO_LOG_SAMPLE_RATE) || 100, // Log every 100th packet by default
+        // Track to log ('inbound', 'outbound', or 'both')
+        audioLogTrack: process.env.AUDIO_LOG_TRACK || 'inbound',
         // Save actual audio to files (DISABLED by default)
         saveAudioToFile: false, // Explicitly disabled, regardless of environment variable
         // Directory to save audio files (only used if explicitly enabled in code)
@@ -634,7 +685,7 @@ class CallSession {
               // this.services.audioLogger.saveAudio() is not called
               
               // Only process audio from the inbound track (what the caller is saying)
-              if (data.media.track === "inbound" || data.media.track === "outbound") {
+              if (data.media.track === "inbound" | data.media.track === "outbound") {
                 try {
                   const payload = data.media.payload;
                   
