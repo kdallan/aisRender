@@ -6,9 +6,9 @@ const WebSocket = require("ws");
 const url = require("url");
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 
-// Audio buffer utility for decoding base64 remains the same.
+// Audio buffer utility for decoding base64
 const audioBufferPool = {
-  decodeBase64(base64String) {
+  decodeBase64: (base64String) => {
     if (!base64String) return null;
     try {
       return Buffer.from(base64String, "base64");
@@ -17,12 +17,12 @@ const audioBufferPool = {
       return null;
     }
   },
-  clear() {
+  clear: () => {
     // No resources to clear
   },
 };
 
-// Logging system (minimal logging unless DEBUG/TRACE are enabled)
+// Logging system with improved error logging
 const logger = {
   info: (message, data) => console.log(`[INFO] ${message}`, data || ""),
   error: (message, error) =>
@@ -38,7 +38,7 @@ const logger = {
 
 // Configuration management
 const config = {
-  init() {
+  init: () => {
     require("dotenv").config();
     const requiredEnvVars = [
       "TWILIO_ACCOUNT_SID",
@@ -54,7 +54,9 @@ const config = {
       );
     }
     return {
-      server: { port: parseInt(process.env.HTTP_SERVER_PORT) || 8080 },
+      server: {
+        port: parseInt(process.env.HTTP_SERVER_PORT) || 8080,
+      },
       twilio: {
         accountSid: process.env.TWILIO_ACCOUNT_SID,
         authToken: process.env.TWILIO_AUTH_TOKEN,
@@ -84,7 +86,9 @@ const config = {
         throttleInterval:
           parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 50, // in ms
       },
-      punctuation: { chars: [".", ",", "!", "?", ";", ":"] },
+      punctuation: {
+        chars: [".", ",", "!", "?", ";", ":"],
+      },
     };
   },
 };
@@ -106,16 +110,13 @@ class TextUtils {
   }
 
   searchWordInSentence(sentence, word) {
-    if (
-      !sentence ||
-      !word ||
-      typeof sentence !== "string" ||
-      typeof word !== "string"
-    ) {
+    if (!sentence || !word || typeof sentence !== "string" || typeof word !== "string") {
       return false;
     }
     const pattern = this.commandPatterns[word.toLowerCase()];
-    if (pattern) return pattern.test(sentence);
+    if (pattern) {
+      return pattern.test(sentence);
+    }
     return sentence.trim().toLowerCase().includes(word.trim().toLowerCase());
   }
 }
@@ -144,11 +145,7 @@ class TwilioService {
   generateSayAndHangupTwiML(phrase, options = {}) {
     try {
       const twiml = new this.VoiceResponse();
-      const voiceOptions = {
-        voice: options.voice || "Polly.Amy-Neural",
-        language: options.language || "en-US",
-        ...options,
-      };
+      const voiceOptions = { voice: options.voice || "Polly.Amy-Neural", language: options.language || "en-US", ...options };
       twiml.say(voiceOptions, phrase);
       twiml.hangup();
       return twiml.toString();
@@ -195,11 +192,9 @@ class DeepgramSTTService {
 
   connect() {
     try {
-      logger.info(
-        this.reconnecting
-          ? `Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`
-          : "Connecting to Deepgram..."
-      );
+      logger.info(this.reconnecting ? 
+        `Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...` :
+        "Connecting to Deepgram...");
       this.deepgram = this.client.listen.live(this.config.sttConfig);
       if (this.keepAliveInterval) clearInterval(this.keepAliveInterval);
       this.keepAliveInterval = setInterval(() => {
@@ -264,18 +259,18 @@ class DeepgramSTTService {
         }
       });
     });
-
+    
     this.deepgram.addListener(LiveTranscriptionEvents.Close, () => {
       logger.info("Deepgram STT connection closed");
       this.connected = false;
       this._handleConnectionFailure();
     });
-
+    
     this.deepgram.addListener(LiveTranscriptionEvents.Error, (error) => {
       logger.error("Deepgram STT error", error);
       if (!this.connected) this._handleConnectionFailure();
     });
-
+    
     this.deepgram.addListener(LiveTranscriptionEvents.Warning, (warning) => {
       logger.warn("Deepgram STT warning", warning);
     });
@@ -314,11 +309,12 @@ class DeepgramSTTService {
     this.connected = false;
     this.reconnecting = false;
   }
-};
+}
 
-// Helper to parse incoming messages (binary or string)
+// Helper to parse incoming WebSocket messages (binary or string)
 const parseIncomingMessage = (message) => {
-  let data = null, messageText = "";
+  let data = null;
+  let messageText = "";
   try {
     if (Buffer.isBuffer(message)) {
       messageText = message.toString("utf8");
@@ -346,15 +342,14 @@ class CallSession {
     this.inboundPackets = 0;
     this.outboundPackets = 0;
     this.silencePackets = 0;
-
     // Throttling and batching properties
     this.lastAudioSent = 0;
     this.throttleInterval = this.services.config.deepgram.throttleInterval;
     this.audioBufferQueue = [];
-    // Flush the audio queue every 200ms (configurable via env)
-    this.batchFlushInterval = parseInt(process.env.AUDIO_BATCH_FLUSH_INTERVAL) || 200;
+    this.batchFlushInterval =
+      parseInt(process.env.AUDIO_BATCH_FLUSH_INTERVAL) || 200;
     this.batchTimer = setInterval(() => this._flushAudioBufferQueue(), this.batchFlushInterval);
-
+    
     // Bind methods
     this._handleMessage = this._handleMessage.bind(this);
     this._handleClose = this._handleClose.bind(this);
@@ -362,7 +357,7 @@ class CallSession {
     this._handleUtteranceEnd = this._handleUtteranceEnd.bind(this);
     this._handleHangup = this._handleHangup.bind(this);
     this._cleanup = this._cleanup.bind(this);
-
+    
     // Set up Deepgram STT service
     this.sttService = new DeepgramSTTService(
       this.services.config.deepgram,
@@ -370,25 +365,25 @@ class CallSession {
       this._handleUtteranceEnd
     );
     this.deepgram = this.sttService.connect();
-
-    // WebSocket event handlers
+    
+    // Set up WebSocket event handlers
     this.ws.on("message", this._handleMessage);
     this.ws.on("close", this._handleClose);
     this.ws.on("error", (error) => logger.error("WebSocket error:", error));
-
+    
     // Statistics reporting timer
     this.statsTimer = setInterval(() => {
       if (this.receivedPackets > 0) {
         logger.info(
-          `Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}, outbound=${this.outboundPackets}, silence=${this.silencePackets}`
+          `Call statistics: total=${this.receivedPackets}, inbound=${this.inboundPackets}, outbound=${this.outboundPackets}, silence=${this.silencePackets}`
         );
       }
     }, 10000);
-
+    
     logger.info("New call session created");
   }
 
-  async _handleMessage(message) {
+  _handleMessage(message) {
     if (!this.active) return;
     const { data, messageText } = parseIncomingMessage(message);
     if (!data) return;
@@ -398,8 +393,7 @@ class CallSession {
         logger.info("Twilio: Connected event received");
         break;
       case "start":
-        this.callSid =
-          (data.start && data.start.callSid) || data.callSid || null;
+        this.callSid = (data.start && data.start.callSid) || data.callSid || null;
         if (!this.callSid) {
           logger.warn("Twilio: Call started but callSid not found", data);
         } else {
@@ -412,7 +406,7 @@ class CallSession {
           this.hasSeenMedia = true;
           if (data.media) {
             logger.info(
-              `Media info: track=${data.media.track}, chunk=${data.media.chunk}, timestamp=${data.media.timestamp}`
+              `Media packet info: track=${data.media.track}, chunk=${data.media.chunk}, timestamp=${data.media.timestamp}`
             );
           }
         }
@@ -433,16 +427,16 @@ class CallSession {
             this.lastAudioSent = now;
             try {
               const payload = data.media.payload;
-              const hasEnergy = this._hasAudioEnergy(payload);
-              const rawAudio = audioBufferPool.decodeBase64(payload);
-              if (rawAudio) {
-                if (hasEnergy) {
+              const hasAudio = this._hasAudioEnergy(payload);
+              if (hasAudio) {
+                const rawAudio = audioBufferPool.decodeBase64(payload);
+                if (rawAudio) {
                   this.audioBufferQueue.push(rawAudio);
                 } else {
-                  this.silencePackets++;
+                  logger.warn("Failed to decode audio payload");
                 }
               } else {
-                logger.warn("Failed to decode audio payload");
+                this.silencePackets++;
               }
             } catch (error) {
               logger.error("Error processing audio payload", error);
@@ -450,11 +444,11 @@ class CallSession {
           } else {
             this.outboundPackets++;
             if (this.receivedPackets < 5) {
-              logger.debug(`Outbound audio packet, track: ${data.media.track}`);
+              logger.debug(`Received outbound audio packet, track: ${data.media.track}`);
             }
           }
         } else {
-          logger.debug("Media event without payload");
+          logger.debug("Received media event without payload");
         }
         break;
       case "mark":
@@ -469,16 +463,13 @@ class CallSession {
     }
   }
 
-  async _flushAudioBufferQueue() {
+  _flushAudioBufferQueue() {
     if (!this.active || this.audioBufferQueue.length === 0) return;
     const combinedBuffer = Buffer.concat(this.audioBufferQueue);
     this.audioBufferQueue = [];
     try {
-      // Optionally, one could re-check energy here before sending
-      if (combinedBuffer.length > 0) {
-        this.sttService.send(combinedBuffer);
-        logger.debug(`Sent combined audio buffer of length ${combinedBuffer.length}`);
-      }
+      this.sttService.send(combinedBuffer);
+      logger.debug(`Sent combined audio buffer of length ${combinedBuffer.length}`);
     } catch (error) {
       logger.error("Error sending combined audio buffer to DeepGram", error);
     }
@@ -556,7 +547,9 @@ class CallSession {
           const index = position + i;
           if (index < packetLength) {
             const byte = binary[index];
-            if (byte !== 0x7F && byte !== 0xFF) nonSilenceCount++;
+            if (byte !== 0x7F && byte !== 0xFF) {
+              nonSilenceCount++;
+            }
           }
         }
       }
@@ -586,14 +579,18 @@ class CallSession {
       }
       if (this.ws) {
         try {
-          if (this.ws.readyState === WebSocket.OPEN) this.ws.terminate();
+          if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.terminate();
+          }
           this.ws.removeAllListeners();
         } catch (err) {
           logger.error("Error terminating WebSocket", err);
         }
         this.ws = null;
       }
-      logger.info(`Call session cleaned up, Call SID: ${this.callSid || "unknown"}, processed ${this.receivedPackets} packets`);
+      logger.info(
+        `Call session cleaned up, Call SID: ${this.callSid || "unknown"}, processed ${this.receivedPackets} packets`
+      );
     } catch (error) {
       logger.error("Error during session cleanup", error);
     }
@@ -686,7 +683,9 @@ class VoiceServer {
 
 process.on("SIGINT", () => {
   logger.info("Received SIGINT signal, shutting down gracefully");
-  if (server) server.stop();
+  if (server) {
+    server.stop();
+  }
   setTimeout(() => {
     logger.info("Forcing exit after timeout");
     process.exit(0);
@@ -695,7 +694,9 @@ process.on("SIGINT", () => {
 
 process.on("SIGTERM", () => {
   logger.info("Received SIGTERM signal, shutting down gracefully");
-  if (server) server.stop();
+  if (server) {
+    server.stop();
+  }
   setTimeout(() => {
     logger.info("Forcing exit after timeout");
     process.exit(0);
@@ -704,7 +705,9 @@ process.on("SIGTERM", () => {
 
 process.on("uncaughtException", (error) => {
   logger.error("Uncaught exception", error);
-  if (server) server.stop();
+  if (server) {
+    server.stop();
+  }
   process.exit(1);
 });
 
