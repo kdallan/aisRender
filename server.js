@@ -663,6 +663,24 @@ const audioBufferPool = {
     if (buffer && Buffer.isBuffer(buffer) && this.buffers.length < this.maxSize) {
       this.buffers.push(buffer);
     }
+  },
+  
+  // Decode base64 string to a buffer
+  decodeBase64(base64String) {
+    try {
+      if (!base64String) return null;
+      
+      // Standard Node.js base64 decoding
+      return Buffer.from(base64String, 'base64');
+    } catch (error) {
+      logger.error("Error decoding base64", error);
+      return null;
+    }
+  },
+  
+  // Clear all buffers in the pool
+  clear() {
+    this.buffers = [];
   }
 };
 
@@ -741,13 +759,27 @@ class VoiceServer {
 
   stop() {
     try {
+      this.isShuttingDown = true;
+      
       // Close all active sessions
       for (const session of this.sessions.values()) {
         session._cleanup();
       }
       
-      // Close the WebSocket server
+      // Clear the session map
+      this.sessions.clear();
+      
+      // Clear the buffer pool
+      audioBufferPool.clear();
+      
+      // Close the WebSocket server with a timeout
+      const closeTimeout = setTimeout(() => {
+        logger.warn("WebSocket server close timed out, forcing exit");
+        this.httpServer.close();
+      }, 5000);
+      
       this.wsServer.close(() => {
+        clearTimeout(closeTimeout);
         logger.info("WebSocket server closed");
         
         // Then close the HTTP server
