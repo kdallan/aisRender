@@ -47,7 +47,13 @@ const config = {
           interim_results: true,
           endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
           utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
-        }
+        },
+        // Buffer aggregation settings
+        bufferMinSize: parseInt(process.env.BUFFER_MIN_SIZE) || 4096, // Larger minimum buffer size
+        bufferMaxAge: parseInt(process.env.BUFFER_MAX_AGE) || 300, // Longer max age (300ms)
+        sendInterval: parseInt(process.env.SEND_INTERVAL) || 50, // Longer interval between sends
+        // Performance throttling settings
+        sampleRate: parseInt(process.env.SAMPLE_RATE) || 2 // Only process 1 in every X packets
       },
       punctuation: {
         chars: [".", ",", "!", "?", ";", ":"]
@@ -423,6 +429,7 @@ class CallSession {
     this.hasSeenMedia = false;
     this.active = true;
     this.hangupInitiated = false; // Flag to track if hangup has been initiated
+    this.packetCounter = 0; // Counter for packet sampling
     
     // Explicitly bind all methods to this instance
     this._handleMessage = this._handleMessage.bind(this);
@@ -494,9 +501,14 @@ class CallSession {
             
             // Process the audio payload
             if (data.media && data.media.payload) {
-              // Only process audio from the inbound track (what the caller is saying)
               if (data.media.track === "inbound" || data.media.track === "outbound") {
                 try {
+                  // Apply sampling - only process 1 in every X packets to reduce load
+                  const packetNum = (this.packetCounter = (this.packetCounter || 0) + 1);
+                  if (packetNum % this.services.config.deepgram.sampleRate !== 0) {
+                    return; // Skip this packet based on sample rate
+                  }
+                  
                   const payload = data.media.payload;
                   
                   // Calculate expected buffer size (base64 decoding)
@@ -517,8 +529,6 @@ class CallSession {
                   logger.error("Error processing audio payload", error);
                 }
               }
-            } else {
-              logger.trace("Twilio: Received media event without payload");
             }
             break;
             
