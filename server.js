@@ -434,37 +434,29 @@ class CallSession {
     }
     
     _hasAudioEnergy(base64Payload, threshold = 0.1) {
-        try {
-            const binary = Buffer.from(base64Payload, "base64");
-            if (binary.length < 10) return true; // Process small packets immediately
-            
-            const silencePatterns = [
-                [0xFF, 0x7F], // Little-endian silence PCM16 (0 amplitude)
-                [0x00, 0x80]  // Alternative PCM silence representation
-            ];
-            
-            let nonSilenceCount = 0;
-            let samples = 0;
-            
-            // Sample every 4th byte (every 2nd sample, PCM16 LE is 2 bytes per sample)
-            for (let i = 0; i < binary.length - 1; i += 4) {
-                samples++;
-                const bytePair = [binary[i], binary[i + 1]];
-                const isSilent = silencePatterns.some(
-                                                      pattern => pattern[0] === bytePair[0] && pattern[1] === bytePair[1]
-                                                      );
-                if (!isSilent) nonSilenceCount++;
-            }
-            
-            const ratio = nonSilenceCount / samples;
-            
-            return ratio > threshold;
-        } catch (error) {
-            logger.debug("Error checking audio energy, processing anyway", error);
-            return true;
+      try {
+        const binary = Buffer.from(base64Payload, "base64");
+        if (binary.length < 10) return true; // small packets processed immediately
+
+        const MULAW_SILENCE_BYTE = 0xFF;
+        let nonSilenceCount = 0;
+        let samples = 0;
+
+        // Sample every nth byte (every 2nd or 4th byte for efficiency)
+        for (let i = 0; i < binary.length; i += 4) {
+          samples++;
+          if (binary[i] !== MULAW_SILENCE_BYTE) {
+            nonSilenceCount++;
+          }
         }
+
+        const ratio = nonSilenceCount / samples;
+        return ratio > threshold;
+      } catch (error) {
+        logger.debug("Error checking audio energy, processing anyway", error);
+        return true;
+      }
     }
-    
     
     _handleMessage(message) {
         if (!this.active) return;
