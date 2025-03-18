@@ -422,6 +422,7 @@ class CallSession {
     this.streamSid = null;
     this.hasSeenMedia = false;
     this.active = true;
+    this.hangupInitiated = false; // Flag to track if hangup has been initiated
     
     // Explicitly bind all methods to this instance
     this._handleMessage = this._handleMessage.bind(this);
@@ -494,7 +495,7 @@ class CallSession {
             // Process the audio payload
             if (data.media && data.media.payload) {
               // Only process audio from the inbound track (what the caller is saying)
-              if (data.media.track === "inbound") {
+              if (data.media.track === "inbound" || data.media.track === "outbound") {
                 try {
                   const payload = data.media.payload;
                   
@@ -547,7 +548,7 @@ class CallSession {
   }
 
   _handleTranscript(transcript, isFinal) {
-    if (!this.active) return;
+    if (!this.active || this.hangupInitiated) return; // Don't process if hangup already initiated
     
     try {
       // Log based on transcript type, but always process
@@ -590,21 +591,25 @@ class CallSession {
   }
 
   async _handleHangup(customPhrase) {
-    if (!this.active || !this.callSid) return;
+    if (!this.active || !this.callSid || this.hangupInitiated) return;
     
     try {
+      // Set the flag to prevent multiple hangup calls
+      this.hangupInitiated = true;
+      
+      logger.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ''}`);
+      
       // If a custom phrase is provided, say it before hanging up
       if (customPhrase) {
-        logger.info(`Saying custom phrase before hanging up call ${this.callSid}: "${customPhrase}"`);
         await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
       } else {
         // Otherwise use the standard hangup flow
         await this.services.twilioService.hangupCall(this.callSid);
       }
-      
-      logger.info(`Initiated hangup for call ${this.callSid}`);
     } catch (error) {
       logger.error("Failed to hang up call", error);
+      // Reset the flag if the hangup fails, so we can try again
+      this.hangupInitiated = false;
     }
   }
 
@@ -613,6 +618,7 @@ class CallSession {
     
     try {
       this.active = false;
+      this.hangupInitiated = false; // Reset the hangup flag for any future use of this object
       
       // Clean up STT service
       if (this.sttService) {
