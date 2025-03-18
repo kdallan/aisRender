@@ -2,8 +2,8 @@
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
-const WebSocket = require('ws');
-const url = require('url');
+const WebSocket = require("ws");
+const url = require("url");
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 
 // Audio buffer utility for decoding base64
@@ -11,14 +11,12 @@ const audioBufferPool = {
   decodeBase64(base64String) {
     try {
       if (!base64String) return null;
-      return Buffer.from(base64String, 'base64');
+      return Buffer.from(base64String, "base64");
     } catch (error) {
       logger.error("Error decoding base64", error);
       return null;
     }
   },
-  
-  // Clear resources
   clear() {
     // No resources to clear
   }
@@ -27,41 +25,39 @@ const audioBufferPool = {
 // Logging system
 const logger = {
   info(message, data) {
-    console.log(`[INFO] ${message}`, data ? data : '');
+    console.log(`[INFO] ${message}`, data || "");
   },
   error(message, error) {
-    console.error(`[ERROR] ${message}`, error);
+    console.error(`[ERROR] ${message}`, error ? error.stack || error : "");
   },
   warn(message, data) {
-    console.warn(`[WARN] ${message}`, data ? data : '');
+    console.warn(`[WARN] ${message}`, data || "");
   },
   debug(message, data) {
     if (process.env.DEBUG) {
-      console.log(`[DEBUG] ${message}`, data ? data : '');
+      console.log(`[DEBUG] ${message}`, data || "");
     }
   },
   trace(message, data) {
     if (process.env.TRACE) {
-      console.log(`[TRACE] ${message}`, data ? data : '');
+      console.log(`[TRACE] ${message}`, data || "");
     }
   }
 };
 
 // Configuration management
 const config = {
-  // Load configuration with validation and defaults
   init() {
-    // Load environment variables
     require("dotenv").config();
-    
-    // Validate required environment variables
-    const requiredEnvVars = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'DEEPGRAM_API_KEY'];
+    const requiredEnvVars = [
+      "TWILIO_ACCOUNT_SID",
+      "TWILIO_AUTH_TOKEN",
+      "DEEPGRAM_API_KEY"
+    ];
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-    
     if (missingVars.length > 0) {
-      throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+      throw new Error(`Missing required environment variables: ${missingVars.join(", ")}`);
     }
-    
     return {
       server: {
         port: parseInt(process.env.HTTP_SERVER_PORT) || 8080
@@ -73,8 +69,8 @@ const config = {
       },
       deepgram: {
         apiKey: process.env.DEEPGRAM_API_KEY,
-        ttsWebsocketURL: process.env.DEEPGRAM_TTS_WS_URL || 
-                        'wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none',
+        ttsWebsocketURL: process.env.DEEPGRAM_TTS_WS_URL ||
+          "wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none",
         sttConfig: {
           model: process.env.DEEPGRAM_MODEL || "nova-2-phonecall",
           language: process.env.DEEPGRAM_LANGUAGE || "en",
@@ -101,7 +97,6 @@ const config = {
 class TextUtils {
   constructor(config) {
     this.puntuationChars = config.chars;
-    
     // Pre-compile regex patterns for commonly searched words
     this.commandPatterns = {
       hangup: /\b(hangup|hang up)\b/i,
@@ -110,28 +105,22 @@ class TextUtils {
   }
 
   containsAnyPunctuation(text) {
-    if (!text || typeof text !== 'string') return false;
+    if (!text || typeof text !== "string") return false;
     return Array.from(text).some(char => this.puntuationChars.includes(char));
   }
 
   searchWordInSentence(sentence, word) {
-    if (!sentence || !word || typeof sentence !== 'string' || typeof word !== 'string') {
+    if (!sentence || !word || typeof sentence !== "string" || typeof word !== "string") {
       return false;
     }
-    
-    // Use pre-compiled patterns for known commands (much faster)
     if (this.commandPatterns[word.toLowerCase()]) {
       return this.commandPatterns[word.toLowerCase()].test(sentence);
     }
-    
-    // Fallback to standard search for other words
     const trimmedSentence = sentence.trim();
     const trimmedWord = word.trim();
-    
     if (!trimmedSentence || !trimmedWord) {
       return false;
     }
-    
     return trimmedSentence.toLowerCase().includes(trimmedWord.toLowerCase());
   }
 }
@@ -140,7 +129,7 @@ class TwilioService {
   constructor(config) {
     this.config = config;
     this.client = require("twilio")(config.accountSid, config.authToken);
-    this.VoiceResponse = require('twilio').twiml.VoiceResponse;
+    this.VoiceResponse = require("twilio").twiml.VoiceResponse;
   }
 
   async hangupCall(callSid) {
@@ -149,7 +138,6 @@ class TwilioService {
       const execution = await this.client.studio.v2
         .flows(this.config.studioFlowId)
         .executions(callSid);
-      
       logger.info("Call hangup executed", { executionSid: execution.sid });
       return execution;
     } catch (error) {
@@ -158,64 +146,35 @@ class TwilioService {
     }
   }
   
-  /**
-   * Generate TwiML to say a phrase and then hang up
-   * @param {string} phrase - The text to say before hanging up
-   * @param {Object} options - Options for voice, language, etc.
-   * @returns {string} TwiML response as a string
-   */
   generateSayAndHangupTwiML(phrase, options = {}) {
     try {
       const twiml = new this.VoiceResponse();
-      
-      // Set default options
       const voiceOptions = {
-        voice: options.voice || 'Polly.Amy-Neural', // Using a neural voice
-        language: options.language || 'en-US',
+        voice: options.voice || "Polly.Amy-Neural",
+        language: options.language || "en-US",
         ...options
       };
-      
-      // Add the Say verb with the phrase
       twiml.say(voiceOptions, phrase);
-      
-      // Add the Hangup verb
       twiml.hangup();
-      
       return twiml.toString();
     } catch (error) {
       logger.error("Error generating TwiML", error);
-      
-      // Return a simple TwiML in case of error
       const fallbackTwiml = new this.VoiceResponse();
-      fallbackTwiml.say('Sorry, an error occurred.');
+      fallbackTwiml.say("Sorry, an error occurred.");
       fallbackTwiml.hangup();
       return fallbackTwiml.toString();
     }
   }
   
-  /**
-   * Update an ongoing call with new TwiML instructions
-   * @param {string} callSid - The SID of the call to update
-   * @param {string} phrase - The phrase to say before hanging up
-   * @returns {Promise} - Promise resolving to call update result
-   */
   async sayPhraseAndHangup(callSid, phrase) {
     try {
       if (!callSid) {
         throw new Error("Call SID is required");
       }
-      
       logger.info(`Saying phrase and hanging up call ${callSid}: "${phrase}"`);
-      
-      // Generate the TwiML
       const twiml = this.generateSayAndHangupTwiML(phrase);
-      
-      // Update the call with the new TwiML
       const result = await this.client.calls(callSid)
-        .update({
-          twiml: twiml
-        });
-      
+        .update({ twiml });
       logger.info(`Call ${callSid} successfully updated with TwiML`);
       return result;
     } catch (error) {
@@ -242,6 +201,9 @@ class DeepgramSTTService {
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000; // Start with 1 second delay
     
+    // New flag to indicate intentional shutdown
+    this.manualShutdown = false;
+    
     logger.info("STT Service: Initialized Deepgram service");
   }
 
@@ -252,23 +214,20 @@ class DeepgramSTTService {
       } else {
         logger.info("Connecting to Deepgram...");
       }
-      
       this.deepgram = this.client.listen.live(this.config.sttConfig);
       
       // Set up keep-alive interval
       if (this.keepAliveInterval) {
         clearInterval(this.keepAliveInterval);
       }
-      
       this.keepAliveInterval = setInterval(() => {
         if (this.deepgram && this.connected) {
           this.deepgram.keepAlive();
         }
       }, 10 * 1000);
-
+      
       // Set up event listeners
       this._setupEventListeners();
-      
       return this.deepgram;
     } catch (error) {
       logger.error("Failed to connect to Deepgram STT", error);
@@ -278,18 +237,15 @@ class DeepgramSTTService {
   }
 
   _handleConnectionFailure() {
-    this.connected = false;
+    // Do not reconnect if shutdown was intentional
+    if (this.manualShutdown) return;
     
-    // Attempt to reconnect with exponential backoff
+    this.connected = false;
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnecting = true;
       this.reconnectAttempts++;
-      
-      // Calculate delay with exponential backoff (1s, 2s, 4s, 8s, etc.)
       const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-      
       logger.info(`Will attempt to reconnect in ${delay}ms...`);
-      
       setTimeout(() => {
         this.connect();
       }, delay);
@@ -309,20 +265,15 @@ class DeepgramSTTService {
       
       this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
         try {
-          // Process interim results immediately, prioritizing real-time output
           if (!data.is_final) {
             const transcript = data.channel?.alternatives?.[0]?.transcript;
             if (transcript) {
-              // Immediately call handler for interim results
               this.onTranscript && this.onTranscript(transcript, false);
             }
             return;
           }
-          
-          // For final transcripts
           const transcript = data.channel?.alternatives?.[0]?.transcript;
           if (!transcript) return;
-          
           this.isFinals.push(transcript);
           if (data.speech_final) {
             const utterance = this.isFinals.join(" ");
@@ -363,22 +314,17 @@ class DeepgramSTTService {
     });
   }
 
-  // Send audio data directly to Deepgram
   send(audioData) {
     if (!this.connected || !this.deepgram) {
       logger.debug("Not sending audio because connection is not open");
       return;
     }
-    
     if (!audioData || !Buffer.isBuffer(audioData) || audioData.length === 0) return;
-    
     try {
       this.deepgram.send(audioData);
     } catch (error) {
       logger.error("Failed to send audio to Deepgram", error);
-      
-      // If we have a connection error, attempt to reconnect
-      if (error.message && error.message.includes('not open')) {
+      if (error.message && error.message.includes("not open")) {
         this.connected = false;
         this._handleConnectionFailure();
       }
@@ -386,22 +332,21 @@ class DeepgramSTTService {
   }
 
   cleanup() {
+    // Set shutdown flag so no reconnects are attempted
+    this.manualShutdown = true;
+    
     if (this.keepAliveInterval) {
       clearInterval(this.keepAliveInterval);
       this.keepAliveInterval = null;
     }
-    
-    // Remove all event listeners
     if (this.deepgram) {
       try {
-        // Close the connection
         this.deepgram.requestClose();
       } catch (error) {
         logger.error("Error while closing Deepgram connection", error);
       }
       this.deepgram = null;
     }
-    
     this.connected = false;
     this.reconnecting = false;
   }
@@ -435,7 +380,7 @@ class CallSession {
     this._handleHangup = this._handleHangup.bind(this);
     this._cleanup = this._cleanup.bind(this);
     
-    // Set up speech-to-text service with callbacks
+    // Set up Deepgram STT service with callbacks
     this.sttService = new DeepgramSTTService(
       this.services.config.deepgram, 
       this._handleTranscript,
@@ -469,7 +414,7 @@ class CallSession {
       // Log raw message type and size for debugging
       const msgType = typeof message;
       const msgSize = Buffer.isBuffer(message) ? message.length : 
-                     (msgType === 'string' ? message.length : 'unknown');
+                     (msgType === "string" ? message.length : "unknown");
       logger.debug(`WebSocket message received: type=${msgType}, size=${msgSize}`);
       
       // With 'ws', message can be string or Buffer
@@ -480,10 +425,10 @@ class CallSession {
       if (Buffer.isBuffer(message)) {
         try {
           // For binary data, try to convert to string first
-          messageText = message.toString('utf8');
+          messageText = message.toString("utf8");
           try {
             data = JSON.parse(messageText);
-            logger.debug(`Successfully parsed binary message as JSON`);
+            logger.debug("Successfully parsed binary message as JSON");
           } catch (e) {
             // If it's not valid JSON, log the first part of the message
             const sample = messageText.substring(0, 100);
@@ -492,16 +437,16 @@ class CallSession {
           }
         } catch (e) {
           // If we can't convert to string, log the raw binary data
-          const sample = message.length > 20 ? message.slice(0, 20).toString('hex') : message.toString('hex');
+          const sample = message.length > 20 ? message.slice(0, 20).toString("hex") : message.toString("hex");
           logger.debug(`Binary data (hex): ${sample}...`);
           return;
         }
-      } else if (typeof message === 'string') {
+      } else if (typeof message === "string") {
         // For string data, parse as JSON
         messageText = message;
         try {
           data = JSON.parse(message);
-          logger.debug(`Successfully parsed string message as JSON`);
+          logger.debug("Successfully parsed string message as JSON");
         } catch (e) {
           logger.debug(`String message not valid JSON: ${message.substring(0, 100)}...`);
           return;
@@ -623,11 +568,10 @@ class CallSession {
       }
     } catch (error) {
       logger.error("Error processing message", error);
-      // Log a sample of the message for debugging
       if (message) {
-        const sample = Buffer.isBuffer(message) 
-          ? `Binary message of length ${message.length}` 
-          : `Message: ${typeof message === 'string' ? message.substring(0, 100) : typeof message}`;
+        const sample = Buffer.isBuffer(message)
+          ? `Binary message of length ${message.length}`
+          : `Message: ${typeof message === "string" ? message.substring(0, 100) : typeof message}`;
         logger.error(`Message sample: ${sample}`);
       }
     }
@@ -639,29 +583,16 @@ class CallSession {
   }
 
   _handleTranscript(transcript, isFinal) {
-    if (!this.active || this.hangupInitiated) return; // Don't process if hangup already initiated
-    
+    if (!this.active || this.hangupInitiated) return;
     try {
-      // Always log with INFO level for visibility, whether interim or final
-      if (isFinal) {
-        logger.info(`Deepgram STT: [Final] ${transcript}`);
-      } else {
-        // Show interim results at INFO level so they're always visible
-        logger.info(`Deepgram STT: [Interim] ${transcript}`);
-      }
-      
-      // Process all transcripts in real-time, even interim results
-      // Check for hangup command in the transcript
-      if (this.services.textUtils.searchWordInSentence(transcript, "hangup") || 
-          this.services.textUtils.searchWordInSentence(transcript, "hang up")) {
+      logger.info(`Deepgram STT: [${isFinal ? "Final" : "Interim"}] ${transcript}`);
+      if (
+        this.services.textUtils.searchWordInSentence(transcript, "hangup") ||
+        this.services.textUtils.searchWordInSentence(transcript, "hang up")
+      ) {
         logger.info("Hangup command detected in transcript");
-        
-        // Say a goodbye message before hanging up
         this._handleHangup("Thank you for calling. Goodbye.");
-      }
-      
-      // Check for goodbye command with custom message
-      else if (this.services.textUtils.searchWordInSentence(transcript, "goodbye")) {
+      } else if (this.services.textUtils.searchWordInSentence(transcript, "goodbye")) {
         logger.info("Goodbye command detected in transcript");
         this._handleHangup("We appreciate your call. Have a great day!");
       }
@@ -672,11 +603,8 @@ class CallSession {
 
   _handleUtteranceEnd(utterance) {
     if (!this.active) return;
-    
     try {
       logger.info(`Complete utterance: ${utterance}`);
-      // Process the complete utterance
-      // This could include sending to a TTS service or other processing
     } catch (error) {
       logger.error("Error handling utterance end", error);
     }
@@ -684,108 +612,81 @@ class CallSession {
 
   async _handleHangup(customPhrase) {
     if (!this.active || !this.callSid || this.hangupInitiated) return;
-    
     try {
-      // Set the flag to prevent multiple hangup calls
       this.hangupInitiated = true;
-      
-      logger.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ''}`);
-      
-      // If a custom phrase is provided, say it before hanging up
+      logger.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
       if (customPhrase) {
         await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
       } else {
-        // Otherwise use the standard hangup flow
         await this.services.twilioService.hangupCall(this.callSid);
       }
     } catch (error) {
       logger.error("Failed to hang up call", error);
-      // Reset the flag if the hangup fails, so we can try again
       this.hangupInitiated = false;
     }
   }
 
-  // Improved method to detect if there's actual audio in the packet by sampling throughout
   _hasAudioEnergy(base64Payload) {
     try {
-      // Decode the base64 data
-      const binary = Buffer.from(base64Payload, 'base64');
-      if (binary.length < 10) return true; // Process very small packets just in case
-      
-      // For µ-law encoded audio, check if it's not just silence (0x7F or 0xFF)
+      const binary = Buffer.from(base64Payload, "base64");
+      if (binary.length < 10) return true;
       let nonSilenceCount = 0;
-      
-      // Sample throughout the packet instead of just the beginning
-      // Take 10 samples from different parts of the packet
       const packetLength = binary.length;
       const samplePositions = [
-        0,                    // Start
+        0,
         Math.floor(packetLength * 0.1),
         Math.floor(packetLength * 0.2),
         Math.floor(packetLength * 0.3),
         Math.floor(packetLength * 0.4),
-        Math.floor(packetLength * 0.5), // Middle
+        Math.floor(packetLength * 0.5),
         Math.floor(packetLength * 0.6),
         Math.floor(packetLength * 0.7),
         Math.floor(packetLength * 0.8),
-        Math.floor(packetLength * 0.9)  // End
+        Math.floor(packetLength * 0.9)
       ];
-      
-      // For each position, check 5 consecutive bytes
       for (const position of samplePositions) {
         for (let i = 0; i < 5; i++) {
           const index = position + i;
           if (index < packetLength) {
             const byte = binary[index];
-            // In µ-law, silence is approximately 0x7F or 0xFF
             if (byte !== 0x7F && byte !== 0xFF) {
               nonSilenceCount++;
             }
           }
         }
       }
-      
-      // Consider at least a few non-silence samples as containing audio
       return nonSilenceCount > 2;
     } catch (error) {
       logger.debug("Error checking audio energy, processing anyway", error);
-      return true; // Assume it has audio if we can't check
+      return true;
     }
   }
 
   _cleanup() {
     if (!this.active) return;
-    
     try {
       this.active = false;
-      this.hangupInitiated = false; // Reset the hangup flag for any future use of this object
-      
-      // Stop statistics timer
+      this.hangupInitiated = false;
       if (this.statsTimer) {
         clearInterval(this.statsTimer);
         this.statsTimer = null;
       }
-      
-      // Clean up STT service
       if (this.sttService) {
         this.sttService.cleanup();
         this.sttService = null;
       }
-      
-      // Make sure to terminate the websocket if still open
       if (this.ws) {
         try {
           if (this.ws.readyState === WebSocket.OPEN) {
             this.ws.terminate();
           }
-          this.ws.removeAllListeners(); // Remove all event listeners
+          this.ws.removeAllListeners();
         } catch (err) {
           logger.error("Error terminating WebSocket", err);
         }
         this.ws = null;
       }
-      
-      logger.info(`Call session cleaned up, Call SID: ${this.callSid || 'unknown'}, processed ${this.receivedPackets} packets`);
+      logger.info(`Call session cleaned up, Call SID: ${this.callSid || "unknown"}, processed ${this.receivedPackets} packets`);
     } catch (error) {
       logger.error("Error during session cleanup", error);
     }
@@ -800,73 +701,42 @@ class VoiceServer {
       twilioService: new TwilioService(this.config.twilio),
       textUtils: new TextUtils(this.config.punctuation)
     };
-    
-    // Set up HTTP server
     this.httpServer = http.createServer(this._handleHttpRequest.bind(this));
-    
-    // Set WebSocket options for the server
     const wsOptions = {
       server: this.httpServer,
-      // The following options are important for handling Twilio's WebSocket streams
-      perMessageDeflate: false, // Disable compression for better voice streaming performance
-      maxPayload: 65536, // 64KB max message size to handle audio chunks
-      // Allow binary frames directly
+      perMessageDeflate: false,
+      maxPayload: 65536,
       handleProtocols: () => true
     };
-    
-    // Set up WebSocket server using 'ws' package
     this.wsServer = new WebSocket.Server(wsOptions);
-    
-    // Set up WebSocket handlers
     this._setupWebSocketHandlers();
-    
-    // Call sessions map
     this.sessions = new Map();
-    
-    // Server state
     this.isShuttingDown = false;
   }
 
   _handleHttpRequest(req, res) {
-    // Simple HTTP routing handler
     const { pathname } = url.parse(req.url);
-    
-    if (pathname === '/') {
-      // Root path - send simple status response
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('aiShield Monitor');
+    if (pathname === "/") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("aiShield Monitor");
     } else {
-      // 404 for any other path
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not Found');
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not Found");
     }
   }
 
   _setupWebSocketHandlers() {
-    this.wsServer.on('connection', (ws, req) => {
+    this.wsServer.on("connection", (ws, req) => {
       logger.info("New WebSocket connection established");
-      
-      // Debug the WebSocket connection
-      logger.info(`WebSocket connection headers: ${JSON.stringify(req.headers['sec-websocket-protocol'] || 'none')}`);
-      
-      // Debug raw message handler to trace all incoming data
-      ws._socket.on('data', (data) => {
-        logger.debug(`Raw WebSocket data received: ${data.length} bytes`);
-      });
-      
-      // Create a new call session for this connection
+      logger.info(`WebSocket connection headers: ${JSON.stringify(req.headers["sec-websocket-protocol"] || "none")}`);
+      ws._socket.on("data", (data) => logger.debug(`Raw WebSocket data received: ${data.length} bytes`));
       const session = new CallSession(ws, this.services);
-      
-      // Use a unique ID for the session based on socket information
       const remoteAddress = req.socket.remoteAddress;
       const remotePort = req.socket.remotePort;
       const sessionId = `${remoteAddress}:${remotePort}`;
-      
       this.sessions.set(sessionId, session);
-      
-      // Remove the session when the connection closes
-      ws.on('close', (code, reason) => {
-        logger.info(`WebSocket closed with code ${code}, reason: ${reason || 'none'}`);
+      ws.on("close", (code, reason) => {
+        logger.info(`WebSocket closed with code ${code}, reason: ${reason || "none"}`);
         this.sessions.delete(sessionId);
         logger.info(`Session ${sessionId} removed`);
       });
@@ -887,29 +757,18 @@ class VoiceServer {
   stop() {
     try {
       this.isShuttingDown = true;
-      
-      // Close all active sessions
       for (const session of this.sessions.values()) {
         session._cleanup();
       }
-      
-      // Clear the session map
       this.sessions.clear();
-      
-      // Clear the buffer pool
       audioBufferPool.clear();
-      
-      // Close the WebSocket server with a timeout
       const closeTimeout = setTimeout(() => {
         logger.warn("WebSocket server close timed out, forcing exit");
         this.httpServer.close();
       }, 5000);
-      
       this.wsServer.close(() => {
         clearTimeout(closeTimeout);
         logger.info("WebSocket server closed");
-        
-        // Then close the HTTP server
         this.httpServer.close(() => {
           logger.info("HTTP server closed");
         });
@@ -920,8 +779,7 @@ class VoiceServer {
   }
 }
 
-// Handle process termination
-process.on('SIGINT', () => {
+process.on("SIGINT", () => {
   logger.info("Received SIGINT signal, shutting down gracefully");
   if (server) {
     server.stop();
@@ -932,7 +790,7 @@ process.on('SIGINT', () => {
   }, 5000);
 });
 
-process.on('SIGTERM', () => {
+process.on("SIGTERM", () => {
   logger.info("Received SIGTERM signal, shutting down gracefully");
   if (server) {
     server.stop();
@@ -943,7 +801,7 @@ process.on('SIGTERM', () => {
   }, 5000);
 });
 
-process.on('uncaughtException', (error) => {
+process.on("uncaughtException", (error) => {
   logger.error("Uncaught exception", error);
   if (server) {
     server.stop();
@@ -951,6 +809,5 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
-// Start the server
 const server = new VoiceServer();
 server.start();
