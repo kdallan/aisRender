@@ -2,9 +2,8 @@
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
-const WebSocketServer = require("websocket").server;
-const HttpDispatcher = require("httpdispatcher");
 const WebSocket = require('ws');
+const url = require('url');
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 
 // Configuration management
@@ -676,18 +675,14 @@ class VoiceServer {
       textUtils: new TextUtils(this.config.punctuation)
     };
     
-    // Set up HTTP server and dispatcher
-    this.dispatcher = new HttpDispatcher();
+    // Set up HTTP server
     this.httpServer = http.createServer(this._handleHttpRequest.bind(this));
     
-    // Set up WebSocket server
-    this.wsServer = new WebSocketServer({
-      httpServer: this.httpServer,
-      autoAcceptConnections: true,
+    // Set up WebSocket server using 'ws' package
+    this.wsServer = new WebSocket.Server({
+      server: this.httpServer,
+      // No origin validation for compatibility with Twilio
     });
-    
-    // Set up routes
-    this._setupRoutes();
     
     // Set up WebSocket handlers
     this._setupWebSocketHandlers();
@@ -696,46 +691,41 @@ class VoiceServer {
     this.sessions = new Map();
   }
 
-  _setupRoutes() {
-    this.dispatcher.onGet("/", (req, res) => {
-      logger.debug('GET / received');
+  _handleHttpRequest(req, res) {
+    // Simple HTTP routing handler
+    const { pathname } = url.parse(req.url);
+    
+    if (pathname === '/') {
+      // Root path - send simple status response
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end('aiShield Monitor');
-    });
-    
-    this.dispatcher.onError((req, res) => {
+    } else {
+      // 404 for any other path
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
-    });
+    }
   }
 
   _setupWebSocketHandlers() {
-    this.wsServer.on("connect", (connection) => {
+    this.wsServer.on('connection', (ws, req) => {
       logger.info("New WebSocket connection established");
       
       // Create a new call session for this connection
-      const session = new CallSession(connection, this.services);
+      const session = new CallSession(ws, this.services);
       
-      // Store the session with a unique ID (could use connection ID or generated UUID)
-      const sessionId = connection.socket._peername.port; // Using port as a simple unique ID
+      // Use a unique ID for the session based on socket information
+      const remoteAddress = req.socket.remoteAddress;
+      const remotePort = req.socket.remotePort;
+      const sessionId = `${remoteAddress}:${remotePort}`;
+      
       this.sessions.set(sessionId, session);
       
       // Remove the session when the connection closes
-      connection.on("close", () => {
+      ws.on('close', () => {
         this.sessions.delete(sessionId);
         logger.info(`Session ${sessionId} removed`);
       });
     });
-  }
-
-  _handleHttpRequest(request, response) {
-    try {
-      this.dispatcher.dispatch(request, response);
-    } catch (error) {
-      logger.error("Error handling HTTP request", error);
-      response.writeHead(500, { 'Content-Type': 'text/plain' });
-      response.end('Internal Server Error');
-    }
   }
 
   start() {
@@ -756,9 +746,14 @@ class VoiceServer {
         session._cleanup();
       }
       
-      // Close the HTTP server
-      this.httpServer.close(() => {
-        logger.info("Server stopped");
+      // Close the WebSocket server
+      this.wsServer.close(() => {
+        logger.info("WebSocket server closed");
+        
+        // Then close the HTTP server
+        this.httpServer.close(() => {
+          logger.info("HTTP server closed");
+        });
       });
     } catch (error) {
       logger.error("Error stopping server", error);
