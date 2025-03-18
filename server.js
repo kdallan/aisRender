@@ -475,8 +475,10 @@ class CallSession {
             
             // Process the audio payload
             if (data.media && data.media.payload) {
-              const rawAudio = Buffer.from(data.media.payload, 'base64');
-              this.sttService.send(rawAudio);
+            	if (data.media.track === "inbound") {
+            		const rawAudio = Buffer.from(data.media.payload, 'base64');
+              		this.sttService.send(rawAudio);
+                }      
             } else {
               logger.debug("Twilio: Received media event without payload");
             }
