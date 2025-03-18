@@ -71,6 +71,12 @@ const logger = {
     if (process.env.DEBUG) {
       console.log(`[DEBUG] ${message}`, data ? data : '');
     }
+  },
+  // Add a trace level that's even more restrictive
+  trace(message, data) {
+    if (process.env.TRACE) {
+      console.log(`[TRACE] ${message}`, data ? data : '');
+    }
   }
 };
 
@@ -227,7 +233,7 @@ class DeepgramSTTService {
             this.onTranscript(utterance, true);
           }
         } else {
-          // Log and process each final segment
+          // Process each final segment
           logger.debug(`Deepgram STT: [Is Final] ${transcript}`);
           
           if (this.onTranscript) {
@@ -235,8 +241,8 @@ class DeepgramSTTService {
           }
         }
       } else {
-        // Log and process all interim results
-        logger.debug(`Deepgram STT: [Interim Result] ${transcript}`);
+        // Process all interim results immediately for real-time command detection
+        logger.debug(`Deepgram STT: [Interim] ${transcript}`);
         
         if (this.onTranscript) {
           this.onTranscript(transcript, false);
@@ -373,6 +379,12 @@ class DeepgramTTSService {
 class TextUtils {
   constructor(config) {
     this.puntuationChars = config.chars;
+    
+    // Pre-compile regex patterns for commonly searched words
+    this.commandPatterns = {
+      hangup: /\b(hangup|hang up)\b/i,
+      goodbye: /\b(goodbye|good bye)\b/i
+    };
   }
 
   containsAnyPunctuation(text) {
@@ -385,6 +397,12 @@ class TextUtils {
       return false;
     }
     
+    // Use pre-compiled patterns for known commands (much faster)
+    if (this.commandPatterns[word.toLowerCase()]) {
+      return this.commandPatterns[word.toLowerCase()].test(sentence);
+    }
+    
+    // Fallback to standard search for other words
     const trimmedSentence = sentence.trim();
     const trimmedWord = word.trim();
     
@@ -475,12 +493,17 @@ class CallSession {
             
             // Process the audio payload
             if (data.media && data.media.payload) {
-            	if (data.media.track === "inbound") {
-            		const rawAudio = Buffer.from(data.media.payload, 'base64');
-              		this.sttService.send(rawAudio);
-                }      
+              // Only process audio from the inbound track (what the caller is saying)
+              if (data.media.track === "inbound") {
+                // Use the buffer pool for better memory efficiency
+                const payload = data.media.payload;
+                const rawAudio = Buffer.from(payload, 'base64');
+                
+                // Process the audio
+                this.sttService.send(rawAudio);
+              }
             } else {
-              logger.debug("Twilio: Received media event without payload");
+              logger.trace("Twilio: Received media event without payload");
             }
             break;
             
@@ -513,13 +536,14 @@ class CallSession {
     if (!this.active) return;
     
     try {
-      // Always log all transcripts, including interim results
+      // Log based on transcript type, but always process
       if (isFinal) {
         logger.info(`Deepgram STT: [Final] ${transcript}`);
       } else {
-        logger.info(`Deepgram STT: [Interim] ${transcript}`);
+        logger.debug(`Deepgram STT: [Interim] ${transcript}`);
       }
       
+      // Process all transcripts in real-time, even interim results
       // Check for hangup command in the transcript
       if (this.services.textUtils.searchWordInSentence(transcript, "hangup") || 
           this.services.textUtils.searchWordInSentence(transcript, "hang up")) {
@@ -534,8 +558,6 @@ class CallSession {
         logger.info("Goodbye command detected in transcript");
         this._handleHangup("We appreciate your call. Have a great day!");
       }
-      
-      // Additional transcript processing could go here
     } catch (error) {
       logger.error("Error handling transcript", error);
     }
@@ -554,17 +576,7 @@ class CallSession {
   }
 
   async _handleHangup(customPhrase) {
-  	logger.info( "_handleHangup" );
-      
-    if (!this.active) {
-    	logger.info( "!this.active" );
-     	return;
-    }
-    
-    if (!this.callSid) {
-    	logger.info( "!this.callSid" );
-        return;
-    }
+    if (!this.active || !this.callSid) return;
     
     try {
       // If a custom phrase is provided, say it before hanging up
@@ -599,6 +611,27 @@ class CallSession {
     }
   }
 }
+
+// Audio buffer pool to reduce memory allocation
+const audioBufferPool = {
+  buffers: [],
+  maxSize: 20, // Maximum number of buffers to keep in the pool
+  
+  // Get a buffer from the pool or create a new one
+  get(size) {
+    if (this.buffers.length > 0) {
+      return this.buffers.pop();
+    }
+    return Buffer.allocUnsafe(size);
+  },
+  
+  // Return a buffer to the pool
+  release(buffer) {
+    if (this.buffers.length < this.maxSize) {
+      this.buffers.push(buffer);
+    }
+  }
+};
 
 class VoiceServer {
   constructor() {
