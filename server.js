@@ -87,7 +87,9 @@ const config = {
           interim_results: true,
           endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
           utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
-        }
+        },
+        // Throttle interval in ms for sending audio packets (default: 50ms)
+        throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 50
       },
       punctuation: {
         chars: [".", ",", "!", "?", ";", ":"]
@@ -421,6 +423,10 @@ class CallSession {
     this.outboundPackets = 0; // Outbound track
     this.silencePackets = 0;  // Packets with silence
     
+    // For throttling audio packets
+    this.lastAudioSent = 0;
+    this.throttleInterval = this.services.config.deepgram.throttleInterval;
+    
     // Explicitly bind all methods to this instance
     this._handleMessage = this._handleMessage.bind(this);
     this._handleClose = this._handleClose.bind(this);
@@ -541,6 +547,7 @@ class CallSession {
             }
           }
           
+          // Increment overall packet count
           this.receivedPackets++;
           
           if (!this.streamSid && data.streamSid) {
@@ -550,12 +557,18 @@ class CallSession {
           
           // Process the audio payload
           if (data.media && data.media.payload) {
-            // Count all packets
-            this.receivedPackets++;
-            
             // Only process audio from the inbound track (what the caller is saying)
             if (data.media.track === "inbound") {
               this.inboundPackets++;
+              
+              // Throttle sending audio to Deepgram
+              const now = Date.now();
+              if (this.lastAudioSent && (now - this.lastAudioSent < this.throttleInterval)) {
+                logger.debug("Skipping audio packet to avoid overwhelming Deepgram");
+                this.silencePackets++;
+                return;
+              }
+              this.lastAudioSent = now;
               
               try {
                 const payload = data.media.payload;
@@ -732,9 +745,8 @@ class CallSession {
         }
       }
       
-      // Consider at least 5% non-silence samples as containing audio
-      // (lowered threshold to catch even brief speech moments)
-      return nonSilenceCount > 2; // Just need a few non-silence samples
+      // Consider at least a few non-silence samples as containing audio
+      return nonSilenceCount > 2;
     } catch (error) {
       logger.debug("Error checking audio energy, processing anyway", error);
       return true; // Assume it has audio if we can't check
