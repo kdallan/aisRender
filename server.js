@@ -5,42 +5,8 @@ const path = require("path");
 const WebSocket = require("ws");
 const url = require("url");
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
-const { Worker, isMainThread, parentPort } = require("worker_threads");
 
-// If not in main thread, run VAD worker code and exit.
-if (!isMainThread) {
-  // Worker thread: wait for a Buffer, then compute a simple VAD.
-  parentPort.on("message", (buffer) => {
-    let sum = 0;
-    const len = buffer.length;
-    for (let i = 0; i < len; i++) {
-      // Calculate absolute difference from neutral value (0x7F)
-      sum += Math.abs(buffer[i] - 0x7F);
-    }
-    const avg = sum / len;
-    // Tune this threshold as needed; lower value = more sensitive to voice.
-    const threshold = 10; 
-    parentPort.postMessage(avg > threshold);
-  });
-  return; // End worker thread.
-}
-
-// Create a single VAD worker instance to offload VAD calculations.
-const vadWorker = new Worker(__filename);
-
-// A helper function that sends a Buffer to the VAD worker and returns a Promise.
-const detectVoice = (buffer) => {
-  return new Promise((resolve) => {
-    const onMessage = (result) => {
-      resolve(result);
-      vadWorker.removeListener("message", onMessage);
-    };
-    vadWorker.on("message", onMessage);
-    vadWorker.postMessage(buffer);
-  });
-};
-
-// Audio buffer utility for decoding base64 remains unchanged.
+// Audio buffer utility for decoding base64 remains the same.
 const audioBufferPool = {
   decodeBase64(base64String) {
     if (!base64String) return null;
@@ -56,7 +22,7 @@ const audioBufferPool = {
   },
 };
 
-// Logging system (logging is minimized unless DEBUG/TRACE are set)
+// Logging system (minimal logging unless DEBUG/TRACE are enabled)
 const logger = {
   info: (message, data) => console.log(`[INFO] ${message}`, data || ""),
   error: (message, error) =>
@@ -140,7 +106,12 @@ class TextUtils {
   }
 
   searchWordInSentence(sentence, word) {
-    if (!sentence || !word || typeof sentence !== "string" || typeof word !== "string") {
+    if (
+      !sentence ||
+      !word ||
+      typeof sentence !== "string" ||
+      typeof word !== "string"
+    ) {
       return false;
     }
     const pattern = this.commandPatterns[word.toLowerCase()];
@@ -218,7 +189,7 @@ class DeepgramSTTService {
     this.reconnecting = false;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
-    this.reconnectDelay = 1000;
+    this.reconnectDelay = 1000; // 1s delay start
     logger.info("STT Service: Initialized Deepgram service");
   }
 
@@ -345,7 +316,7 @@ class DeepgramSTTService {
   }
 };
 
-// A helper to parse incoming messages
+// Helper to parse incoming messages (binary or string)
 const parseIncomingMessage = (message) => {
   let data = null, messageText = "";
   try {
@@ -376,11 +347,11 @@ class CallSession {
     this.outboundPackets = 0;
     this.silencePackets = 0;
 
-    // Throttling and dynamic batching
+    // Throttling and batching properties
     this.lastAudioSent = 0;
     this.throttleInterval = this.services.config.deepgram.throttleInterval;
     this.audioBufferQueue = [];
-    // Batch flush interval (in ms), configurable via env (default: 200ms)
+    // Flush the audio queue every 200ms (configurable via env)
     this.batchFlushInterval = parseInt(process.env.AUDIO_BATCH_FLUSH_INTERVAL) || 200;
     this.batchTimer = setInterval(() => this._flushAudioBufferQueue(), this.batchFlushInterval);
 
@@ -405,7 +376,7 @@ class CallSession {
     this.ws.on("close", this._handleClose);
     this.ws.on("error", (error) => logger.error("WebSocket error:", error));
 
-    // Statistics timer
+    // Statistics reporting timer
     this.statsTimer = setInterval(() => {
       if (this.receivedPackets > 0) {
         logger.info(
@@ -462,21 +433,14 @@ class CallSession {
             this.lastAudioSent = now;
             try {
               const payload = data.media.payload;
-              // Use existing energy check as a fallback
               const hasEnergy = this._hasAudioEnergy(payload);
               const rawAudio = audioBufferPool.decodeBase64(payload);
               if (rawAudio) {
-                // Use worker-based VAD to decide if voice is present
-                detectVoice(rawAudio).then((isVoice) => {
-                  if (isVoice || hasEnergy) {
-                    // If voice is detected in this packet, flush immediately.
-                    this.audioBufferQueue.push(rawAudio);
-                    this._flushAudioBufferQueue();
-                  } else {
-                    // Otherwise, accumulate silently
-                    this.audioBufferQueue.push(rawAudio);
-                  }
-                });
+                if (hasEnergy) {
+                  this.audioBufferQueue.push(rawAudio);
+                } else {
+                  this.silencePackets++;
+                }
               } else {
                 logger.warn("Failed to decode audio payload");
               }
@@ -509,18 +473,14 @@ class CallSession {
     if (!this.active || this.audioBufferQueue.length === 0) return;
     const combinedBuffer = Buffer.concat(this.audioBufferQueue);
     this.audioBufferQueue = [];
-    // Use VAD on the combined buffer before sending; if no voice, drop it.
     try {
-      const isVoice = await detectVoice(combinedBuffer);
-      if (isVoice) {
+      // Optionally, one could re-check energy here before sending
+      if (combinedBuffer.length > 0) {
         this.sttService.send(combinedBuffer);
         logger.debug(`Sent combined audio buffer of length ${combinedBuffer.length}`);
-      } else {
-        logger.debug("Batch determined to be silence; discarding buffer");
-        this.silencePackets += combinedBuffer.length;
       }
     } catch (error) {
-      logger.error("Error in VAD check on combined buffer", error);
+      logger.error("Error sending combined audio buffer to DeepGram", error);
     }
   }
 
