@@ -495,12 +495,26 @@ class CallSession {
             if (data.media && data.media.payload) {
               // Only process audio from the inbound track (what the caller is saying)
               if (data.media.track === "inbound") {
-                // Use the buffer pool for better memory efficiency
-                const payload = data.media.payload;
-                const rawAudio = Buffer.from(payload, 'base64');
-                
-                // Process the audio
-                this.sttService.send(rawAudio);
+                try {
+                  const payload = data.media.payload;
+                  
+                  // Calculate expected buffer size (base64 decoding)
+                  const estimatedSize = Math.ceil(payload.length * 0.75);
+                  
+                  // Get a buffer from the pool
+                  const buffer = audioBufferPool.get(estimatedSize);
+                  
+                  // Convert base64 to binary
+                  const rawAudio = Buffer.from(payload, 'base64');
+                  
+                  // Send to speech-to-text service
+                  this.sttService.send(rawAudio);
+                  
+                  // Return buffer to the pool after processing
+                  audioBufferPool.release(buffer);
+                } catch (error) {
+                  logger.error("Error processing audio payload", error);
+                }
               }
             } else {
               logger.trace("Twilio: Received media event without payload");
@@ -612,22 +626,26 @@ class CallSession {
   }
 }
 
-// Audio buffer pool to reduce memory allocation
+// Audio buffer management for reusing Buffer objects
 const audioBufferPool = {
   buffers: [],
   maxSize: 20, // Maximum number of buffers to keep in the pool
   
-  // Get a buffer from the pool or create a new one
+  // Get a buffer of appropriate size
   get(size) {
-    if (this.buffers.length > 0) {
-      return this.buffers.pop();
+    // Find a buffer of suitable size if available
+    for (let i = 0; i < this.buffers.length; i++) {
+      if (this.buffers[i].length >= size) {
+        return this.buffers.splice(i, 1)[0];
+      }
     }
+    // Create a new buffer if none available
     return Buffer.allocUnsafe(size);
   },
   
   // Return a buffer to the pool
   release(buffer) {
-    if (this.buffers.length < this.maxSize) {
+    if (buffer && Buffer.isBuffer(buffer) && this.buffers.length < this.maxSize) {
       this.buffers.push(buffer);
     }
   }
