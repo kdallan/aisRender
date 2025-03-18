@@ -414,7 +414,12 @@ class CallSession {
     this.hasSeenMedia = false;
     this.active = true;
     this.hangupInitiated = false; // Flag to track if hangup has been initiated
-    this.receivedPackets = 0; // Counter for received packets
+    
+    // Packet counters
+    this.receivedPackets = 0; // All packets
+    this.inboundPackets = 0;  // Inbound track
+    this.outboundPackets = 0; // Outbound track
+    this.silencePackets = 0;  // Packets with silence
     
     // Explicitly bind all methods to this instance
     this._handleMessage = this._handleMessage.bind(this);
@@ -444,7 +449,7 @@ class CallSession {
     // Create packet statistics reporting timer
     this.statsTimer = setInterval(() => {
       if (this.receivedPackets > 0) {
-        logger.info(`Call statistics: received ${this.receivedPackets} packets`);
+        logger.info(`Call statistics: total=${this.receivedPackets}, inbound=${this.inboundPackets}, outbound=${this.outboundPackets}, silence=${this.silencePackets}`);
       }
     }, 10000); // Report every 10 seconds
     
@@ -545,25 +550,41 @@ class CallSession {
           
           // Process the audio payload
           if (data.media && data.media.payload) {
+            // Count all packets
+            this.receivedPackets++;
+            
             // Only process audio from the inbound track (what the caller is saying)
             if (data.media.track === "inbound") {
+              this.inboundPackets++;
+              
               try {
                 const payload = data.media.payload;
                 
-                // Decode the base64 audio data
-                const rawAudio = audioBufferPool.decodeBase64(payload);
-                if (!rawAudio) {
-                  logger.warn("Failed to decode audio payload");
-                  return;
-                }
+                // Check if packet contains audio or just silence (rudimentary)
+                const hasAudio = this._hasAudioEnergy(payload);
                 
-                // Send to speech-to-text service
-                this.sttService.send(rawAudio);
+                if (hasAudio) {
+                  // Decode the base64 audio data
+                  const rawAudio = audioBufferPool.decodeBase64(payload);
+                  if (!rawAudio) {
+                    logger.warn("Failed to decode audio payload");
+                    return;
+                  }
+                  
+                  // Send to speech-to-text service
+                  this.sttService.send(rawAudio);
+                } else {
+                  // Skip silence packets
+                  this.silencePackets++;
+                }
                 
               } catch (error) {
                 logger.error("Error processing audio payload", error);
               }
             } else {
+              // Track outbound packets separately
+              this.outboundPackets++;
+              
               // Log first outbound packet for debugging
               if (this.receivedPackets < 5) {
                 logger.debug(`Received outbound audio packet, track: ${data.media.track}`);
@@ -668,6 +689,55 @@ class CallSession {
       logger.error("Failed to hang up call", error);
       // Reset the flag if the hangup fails, so we can try again
       this.hangupInitiated = false;
+    }
+  }
+
+  // Improved method to detect if there's actual audio in the packet by sampling throughout
+  _hasAudioEnergy(base64Payload) {
+    try {
+      // Decode the base64 data
+      const binary = Buffer.from(base64Payload, 'base64');
+      if (binary.length < 10) return true; // Process very small packets just in case
+      
+      // For µ-law encoded audio, check if it's not just silence (0x7F or 0xFF)
+      let nonSilenceCount = 0;
+      
+      // Sample throughout the packet instead of just the beginning
+      // Take 10 samples from different parts of the packet
+      const packetLength = binary.length;
+      const samplePositions = [
+        0,                    // Start
+        Math.floor(packetLength * 0.1),
+        Math.floor(packetLength * 0.2),
+        Math.floor(packetLength * 0.3),
+        Math.floor(packetLength * 0.4),
+        Math.floor(packetLength * 0.5), // Middle
+        Math.floor(packetLength * 0.6),
+        Math.floor(packetLength * 0.7),
+        Math.floor(packetLength * 0.8),
+        Math.floor(packetLength * 0.9)  // End
+      ];
+      
+      // For each position, check 5 consecutive bytes
+      for (const position of samplePositions) {
+        for (let i = 0; i < 5; i++) {
+          const index = position + i;
+          if (index < packetLength) {
+            const byte = binary[index];
+            // In µ-law, silence is approximately 0x7F or 0xFF
+            if (byte !== 0x7F && byte !== 0xFF) {
+              nonSilenceCount++;
+            }
+          }
+        }
+      }
+      
+      // Consider at least 5% non-silence samples as containing audio
+      // (lowered threshold to catch even brief speech moments)
+      return nonSilenceCount > 2; // Just need a few non-silence samples
+    } catch (error) {
+      logger.debug("Error checking audio energy, processing anyway", error);
+      return true; // Assume it has audio if we can't check
     }
   }
 
