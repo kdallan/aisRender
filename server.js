@@ -242,10 +242,18 @@ class DeepgramSTTService {
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000; // Start with 1 second delay
     
+    this.isShuttingDown = false;
+    
     logger.info("STT Service: Initialized Deepgram service");
   }
 
   connect() {
+  	
+    if (this.isShuttingDown ) {
+      logger.info("Shutdown in progress, not connecting to Deepgram.");
+      return;
+    }    
+  
     try {
       if (this.reconnecting) {
         logger.info(`Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`);
@@ -386,6 +394,9 @@ class DeepgramSTTService {
   }
 
   cleanup() {
+  
+  	this.isShuttingDown = true;
+      
     if (this.keepAliveInterval) {
       clearInterval(this.keepAliveInterval);
       this.keepAliveInterval = null;
