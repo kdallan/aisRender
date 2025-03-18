@@ -7,6 +7,126 @@ const HttpDispatcher = require("httpdispatcher");
 const WebSocket = require('ws');
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 
+// Audio logger utility
+class AudioLogger {
+  constructor(config) {
+    this.config = config;
+    this.audioFiles = new Map(); // Map to track open file handles
+    
+    // Create audio log directory if needed
+    if (this.config.saveAudioToFile) {
+      if (!fs.existsSync(this.config.audioLogDir)) {
+        try {
+          fs.mkdirSync(this.config.audioLogDir, { recursive: true });
+          logger.info(`Created audio log directory: ${this.config.audioLogDir}`);
+        } catch (error) {
+          logger.error(`Failed to create audio log directory: ${this.config.audioLogDir}`, error);
+          this.config.saveAudioToFile = false; // Disable saving if we can't create the directory
+        }
+      }
+    }
+  }
+  
+  // Log audio packet metadata
+  logMetadata(callSid, streamSid, track, payload) {
+    if (!this.config.logAudioMetadata) return;
+    
+    const timestamp = new Date().toISOString();
+    const payloadSize = payload ? payload.length : 0;
+    
+    logger.info(
+      `[${timestamp}] Audio chunk received: callSid=${callSid}, ` + 
+      `streamSid=${streamSid}, track=${track}, size=${payloadSize} bytes`
+    );
+  }
+  
+  // Save audio packet to file
+  async saveAudio(callSid, track, payload) {
+    if (!this.config.saveAudioToFile || !payload) return;
+    
+    try {
+      const fileKey = `${callSid}_${track}`;
+      
+      // Create a new file handle if needed
+      if (!this.audioFiles.has(fileKey)) {
+        const timestamp = new Date().toISOString().replace(/:/g, '-');
+        const filename = path.join(
+          this.config.audioLogDir, 
+          `audio_${callSid}_${track}_${timestamp}.raw`
+        );
+        
+        const fileHandle = fs.createWriteStream(filename, { flags: 'a' });
+        this.audioFiles.set(fileKey, { handle: fileHandle, filename });
+        logger.info(`Created new audio log file: ${filename}`);
+      }
+      
+      // Write the buffer to file
+      const fileData = this.audioFiles.get(fileKey);
+      const buffer = Buffer.from(payload, 'base64');
+      fileData.handle.write(buffer);
+      
+    } catch (error) {
+      logger.error(`Error saving audio data for call ${callSid}`, error);
+    }
+  }
+  
+  // Close a specific audio file
+  closeAudioFile(callSid, track) {
+    const fileKey = `${callSid}_${track}`;
+    if (this.audioFiles.has(fileKey)) {
+      try {
+        const fileData = this.audioFiles.get(fileKey);
+        fileData.handle.end();
+        logger.info(`Closed audio log file: ${fileData.filename}`);
+        this.audioFiles.delete(fileKey);
+      } catch (error) {
+        logger.error(`Error closing audio file for ${fileKey}`, error);
+      }
+    }
+  }
+  
+  // Close all audio files for a call
+  closeCallAudioFiles(callSid) {
+    if (!this.config.saveAudioToFile) return;
+    
+    // Find all file keys for this call
+    const keysToClose = [];
+    for (const key of this.audioFiles.keys()) {
+      if (key.startsWith(`${callSid}_`)) {
+        keysToClose.push(key);
+      }
+    }
+    
+    // Close each file
+    for (const key of keysToClose) {
+      try {
+        const fileData = this.audioFiles.get(key);
+        fileData.handle.end();
+        logger.info(`Closed audio log file: ${fileData.filename}`);
+        this.audioFiles.delete(key);
+      } catch (error) {
+        logger.error(`Error closing audio file for ${key}`, error);
+      }
+    }
+  }
+  
+  // Close all open audio files
+  closeAllAudioFiles() {
+    if (!this.config.saveAudioToFile) return;
+    
+    for (const [key, fileData] of this.audioFiles.entries()) {
+      try {
+        fileData.handle.end();
+        logger.info(`Closed audio log file: ${fileData.filename}`);
+      } catch (error) {
+        logger.error(`Error closing audio file for ${key}`, error);
+      }
+    }
+    
+    this.audioFiles.clear();
+  }
+}
+
 // Configuration management
 const config = {
   // Load configuration with validation and defaults
@@ -51,6 +171,14 @@ const config = {
       },
       punctuation: {
         chars: [".", ",", "!", "?", ";", ":"]
+      },
+      logging: {
+        // Log audio packets metadata (size, track, timestamp)
+        logAudioMetadata: process.env.LOG_AUDIO_METADATA !== 'false', // Default to true
+        // Save actual audio to files (DISABLED by default)
+        saveAudioToFile: false, // Explicitly disabled, regardless of environment variable
+        // Directory to save audio files (only used if explicitly enabled in code)
+        audioLogDir: process.env.AUDIO_LOG_DIR || './audio_logs'
       }
     };
   }
@@ -494,6 +622,17 @@ class CallSession {
             
             // Process the audio payload
             if (data.media && data.media.payload) {
+              // Log audio packet metadata (with timestamp)
+              this.services.audioLogger.logMetadata(
+                this.callSid, 
+                this.streamSid, 
+                data.media.track, 
+                data.media.payload
+              );
+              
+              // Note: Audio saving is disabled by default
+              // this.services.audioLogger.saveAudio() is not called
+              
               // Only process audio from the inbound track (what the caller is saying)
               if (data.media.track === "inbound" || data.media.track === "outbound") {
                 try {
@@ -544,6 +683,12 @@ class CallSession {
 
   _handleClose() {
     logger.info("Twilio: Connection closed");
+    
+    // Close any open audio log files for this call
+    if (this.callSid) {
+      this.services.audioLogger.closeCallAudioFiles(this.callSid);
+    }
+    
     this._cleanup();
   }
 
@@ -663,7 +808,8 @@ class VoiceServer {
     this.services = {
       config: this.config,
       twilioService: new TwilioService(this.config.twilio),
-      textUtils: new TextUtils(this.config.punctuation)
+      textUtils: new TextUtils(this.config.punctuation),
+      audioLogger: new AudioLogger(this.config.logging)
     };
     
     // Set up HTTP server and dispatcher
@@ -745,6 +891,9 @@ class VoiceServer {
       for (const session of this.sessions.values()) {
         session._cleanup();
       }
+      
+      // Close all audio log files
+      this.services.audioLogger.closeAllAudioFiles();
       
       // Close the HTTP server
       this.httpServer.close(() => {
