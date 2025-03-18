@@ -6,6 +6,47 @@ const WebSocket = require('ws');
 const url = require('url');
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 
+// Audio buffer utility for decoding base64
+const audioBufferPool = {
+  decodeBase64(base64String) {
+    try {
+      if (!base64String) return null;
+      return Buffer.from(base64String, 'base64');
+    } catch (error) {
+      logger.error("Error decoding base64", error);
+      return null;
+    }
+  },
+  
+  // Clear resources
+  clear() {
+    // No resources to clear
+  }
+};
+
+// Logging system
+const logger = {
+  info(message, data) {
+    console.log(`[INFO] ${message}`, data ? data : '');
+  },
+  error(message, error) {
+    console.error(`[ERROR] ${message}`, error);
+  },
+  warn(message, data) {
+    console.warn(`[WARN] ${message}`, data ? data : '');
+  },
+  debug(message, data) {
+    if (process.env.DEBUG) {
+      console.log(`[DEBUG] ${message}`, data ? data : '');
+    }
+  },
+  trace(message, data) {
+    if (process.env.TRACE) {
+      console.log(`[TRACE] ${message}`, data ? data : '');
+    }
+  }
+};
+
 // Configuration management
 const config = {
   // Load configuration with validation and defaults
@@ -46,13 +87,7 @@ const config = {
           interim_results: true,
           endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
           utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
-        },
-        // Buffer aggregation settings
-        bufferMinSize: parseInt(process.env.BUFFER_MIN_SIZE) || 4096, // Larger minimum buffer size
-        bufferMaxAge: parseInt(process.env.BUFFER_MAX_AGE) || 300, // Longer max age (300ms)
-        sendInterval: parseInt(process.env.SEND_INTERVAL) || 50, // Longer interval between sends
-        // Performance throttling settings
-        sampleRate: parseInt(process.env.SAMPLE_RATE) || 2 // Only process 1 in every X packets
+        }
       },
       punctuation: {
         chars: [".", ",", "!", "?", ";", ":"]
@@ -61,29 +96,43 @@ const config = {
   }
 };
 
-// Logging system
-const logger = {
-  info(message, data) {
-    console.log(`[INFO] ${message}`, data ? data : '');
-  },
-  error(message, error) {
-    console.error(`[ERROR] ${message}`, error);
-  },
-  warn(message, data) {
-    console.warn(`[WARN] ${message}`, data ? data : '');
-  },
-  debug(message, data) {
-    if (process.env.DEBUG) {
-      console.log(`[DEBUG] ${message}`, data ? data : '');
-    }
-  },
-  // Add a trace level that's even more restrictive
-  trace(message, data) {
-    if (process.env.TRACE) {
-      console.log(`[TRACE] ${message}`, data ? data : '');
-    }
+class TextUtils {
+  constructor(config) {
+    this.puntuationChars = config.chars;
+    
+    // Pre-compile regex patterns for commonly searched words
+    this.commandPatterns = {
+      hangup: /\b(hangup|hang up)\b/i,
+      goodbye: /\b(goodbye|good bye)\b/i
+    };
   }
-};
+
+  containsAnyPunctuation(text) {
+    if (!text || typeof text !== 'string') return false;
+    return Array.from(text).some(char => this.puntuationChars.includes(char));
+  }
+
+  searchWordInSentence(sentence, word) {
+    if (!sentence || !word || typeof sentence !== 'string' || typeof word !== 'string') {
+      return false;
+    }
+    
+    // Use pre-compiled patterns for known commands (much faster)
+    if (this.commandPatterns[word.toLowerCase()]) {
+      return this.commandPatterns[word.toLowerCase()].test(sentence);
+    }
+    
+    // Fallback to standard search for other words
+    const trimmedSentence = sentence.trim();
+    const trimmedWord = word.trim();
+    
+    if (!trimmedSentence || !trimmedWord) {
+      return false;
+    }
+    
+    return trimmedSentence.toLowerCase().includes(trimmedWord.toLowerCase());
+  }
+}
 
 class TwilioService {
   constructor(config) {
@@ -183,10 +232,25 @@ class DeepgramSTTService {
     this.keepAliveInterval = null;
     this.deepgram = null;
     this.isFinals = [];
+    
+    // Connection state
+    this.connected = false;
+    this.reconnecting = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 1000; // Start with 1 second delay
+    
+    logger.info("STT Service: Initialized Deepgram service");
   }
 
   connect() {
     try {
+      if (this.reconnecting) {
+        logger.info(`Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`);
+      } else {
+        logger.info("Connecting to Deepgram...");
+      }
+      
       this.deepgram = this.client.listen.live(this.config.sttConfig);
       
       // Set up keep-alive interval
@@ -195,7 +259,7 @@ class DeepgramSTTService {
       }
       
       this.keepAliveInterval = setInterval(() => {
-        if (this.deepgram) {
+        if (this.deepgram && this.connected) {
           this.deepgram.keepAlive();
         }
       }, 10 * 1000);
@@ -203,95 +267,108 @@ class DeepgramSTTService {
       // Set up event listeners
       this._setupEventListeners();
       
-      logger.info("Deepgram STT service connected");
       return this.deepgram;
     } catch (error) {
       logger.error("Failed to connect to Deepgram STT", error);
-      this.cleanup();
-      throw error;
+      this._handleConnectionFailure();
+      return null;
+    }
+  }
+
+  _handleConnectionFailure() {
+    this.connected = false;
+    
+    // Attempt to reconnect with exponential backoff
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnecting = true;
+      this.reconnectAttempts++;
+      
+      // Calculate delay with exponential backoff (1s, 2s, 4s, 8s, etc.)
+      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+      
+      logger.info(`Will attempt to reconnect in ${delay}ms...`);
+      
+      setTimeout(() => {
+        this.connect();
+      }, delay);
+    } else {
+      logger.error(`Failed to reconnect after ${this.maxReconnectAttempts} attempts`);
+      this.reconnecting = false;
+      this.reconnectAttempts = 0;
     }
   }
 
   _setupEventListeners() {
-    this.deepgram.addListener(LiveTranscriptionEvents.Open, this._handleOpen.bind(this));
-    this.deepgram.addListener(LiveTranscriptionEvents.Close, this._handleClose.bind(this));
-    this.deepgram.addListener(LiveTranscriptionEvents.Error, this._handleError.bind(this));
-    this.deepgram.addListener(LiveTranscriptionEvents.Warning, this._handleWarning.bind(this));
-    this.deepgram.addListener(LiveTranscriptionEvents.Metadata, this._handleMetadata.bind(this));
-  }
-
-  _handleOpen() {
-    logger.info("Deepgram STT connection opened");
-    
-    this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-      const transcript = data.channel.alternatives[0].transcript;
-      if (transcript === "") return;
+    this.deepgram.addListener(LiveTranscriptionEvents.Open, () => {
+      logger.info("Deepgram STT connection opened");
+      this.connected = true;
+      this.reconnecting = false;
+      this.reconnectAttempts = 0;
       
-      if (data.is_final) {
-        this.isFinals.push(transcript);
-        if (data.speech_final) {
-          const utterance = this.isFinals.join(" ");
-          this.isFinals = [];
-          logger.info(`Deepgram STT: [Speech Final] ${utterance}`);
-          
-          if (this.onTranscript) {
-            this.onTranscript(utterance, true);
+      this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        if (!transcript) return;
+        
+        if (data.is_final) {
+          this.isFinals.push(transcript);
+          if (data.speech_final) {
+            const utterance = this.isFinals.join(" ");
+            this.isFinals = [];
+            this.onTranscript && this.onTranscript(utterance, true);
+          } else {
+            this.onTranscript && this.onTranscript(transcript, true);
           }
         } else {
-          // Process each final segment
-          logger.debug(`Deepgram STT: [Is Final] ${transcript}`);
-          
-          if (this.onTranscript) {
-            this.onTranscript(transcript, true);
-          }
+          this.onTranscript && this.onTranscript(transcript, false);
         }
-      } else {
-        // Process all interim results immediately for real-time command detection
-        logger.debug(`Deepgram STT: [Interim] ${transcript}`);
-        
-        if (this.onTranscript) {
-          this.onTranscript(transcript, false);
+      });
+      
+      this.deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, () => {
+        if (this.isFinals.length > 0) {
+          const utterance = this.isFinals.join(" ");
+          this.isFinals = [];
+          this.onUtteranceEnd && this.onUtteranceEnd(utterance);
         }
+      });
+    });
+    
+    this.deepgram.addListener(LiveTranscriptionEvents.Close, () => {
+      logger.info("Deepgram STT connection closed");
+      this.connected = false;
+      this._handleConnectionFailure();
+    });
+    
+    this.deepgram.addListener(LiveTranscriptionEvents.Error, (error) => {
+      logger.error("Deepgram STT error", error);
+      if (!this.connected) {
+        this._handleConnectionFailure();
       }
     });
-
-    this.deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, (data) => {
-      if (this.isFinals.length > 0) {
-        logger.info("Deepgram STT: [Utterance End]");
-        const utterance = this.isFinals.join(" ");
-        this.isFinals = [];
-        
-        if (this.onUtteranceEnd) {
-          this.onUtteranceEnd(utterance);
-        }
-      }
+    
+    this.deepgram.addListener(LiveTranscriptionEvents.Warning, (warning) => {
+      logger.warn("Deepgram STT warning", warning);
     });
   }
 
-  _handleClose() {
-    logger.info("Deepgram STT connection closed");
-    this.cleanup();
-  }
-
-  _handleError(error) {
-    logger.error("Deepgram STT error", error);
-  }
-
-  _handleWarning(warning) {
-    logger.warn("Deepgram STT warning", warning);
-  }
-
-  _handleMetadata(metadata) {
-    logger.debug("Deepgram STT metadata", metadata);
-  }
-
+  // Send audio data directly to Deepgram
   send(audioData) {
+    if (!this.connected || !this.deepgram) {
+      logger.debug("Not sending audio because connection is not open");
+      return;
+    }
+    
+    if (!audioData || !Buffer.isBuffer(audioData) || audioData.length === 0) return;
+    
     try {
-      if (this.deepgram) {
-        this.deepgram.send(audioData);
-      }
+      this.deepgram.send(audioData);
     } catch (error) {
       logger.error("Failed to send audio to Deepgram", error);
+      
+      // If we have a connection error, attempt to reconnect
+      if (error.message && error.message.includes('not open')) {
+        this.connected = false;
+        this._handleConnectionFailure();
+      }
     }
   }
 
@@ -301,134 +378,32 @@ class DeepgramSTTService {
       this.keepAliveInterval = null;
     }
     
+    // Remove all event listeners
     if (this.deepgram) {
       try {
+        // Close the connection
         this.deepgram.requestClose();
       } catch (error) {
         logger.error("Error while closing Deepgram connection", error);
       }
       this.deepgram = null;
     }
-  }
-}
-
-class DeepgramTTSService {
-  constructor(config) {
-    this.config = config;
-    this.ws = null;
-  }
-
-  connect() {
-    try {
-      const options = {
-        headers: {
-          Authorization: `Token ${this.config.apiKey}`
-        }
-      };
-      
-      this.ws = new WebSocket(this.config.ttsWebsocketURL, options);
-      
-      this.ws.on('open', () => {
-        logger.info('Deepgram TTS: Connected');
-      });
-      
-      this.ws.on('message', (data) => {
-        // Handle incoming TTS data
-        logger.debug('Deepgram TTS: Received data');
-      });
-      
-      this.ws.on('close', () => {
-        logger.info('Deepgram TTS: Disconnected');
-        this.ws = null;
-      });
-      
-      this.ws.on('error', (error) => {
-        logger.error('Deepgram TTS: Error', error);
-      });
-      
-      return this.ws;
-    } catch (error) {
-      logger.error("Failed to connect to Deepgram TTS", error);
-      throw error;
-    }
-  }
-
-  send(text) {
-    try {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(text);
-        return true;
-      } else {
-        logger.warn("Deepgram TTS: WebSocket not connected, reconnecting...");
-        this.connect();
-        return false;
-      }
-    } catch (error) {
-      logger.error("Failed to send text to Deepgram TTS", error);
-      return false;
-    }
-  }
-
-  close() {
-    if (this.ws) {
-      try {
-        this.ws.close();
-      } catch (error) {
-        logger.error("Error closing Deepgram TTS connection", error);
-      }
-      this.ws = null;
-    }
-  }
-}
-
-class TextUtils {
-  constructor(config) {
-    this.puntuationChars = config.chars;
     
-    // Pre-compile regex patterns for commonly searched words
-    this.commandPatterns = {
-      hangup: /\b(hangup|hang up)\b/i,
-      goodbye: /\b(goodbye|good bye)\b/i
-    };
-  }
-
-  containsAnyPunctuation(text) {
-    if (!text || typeof text !== 'string') return false;
-    return Array.from(text).some(char => this.puntuationChars.includes(char));
-  }
-
-  searchWordInSentence(sentence, word) {
-    if (!sentence || !word || typeof sentence !== 'string' || typeof word !== 'string') {
-      return false;
-    }
-    
-    // Use pre-compiled patterns for known commands (much faster)
-    if (this.commandPatterns[word.toLowerCase()]) {
-      return this.commandPatterns[word.toLowerCase()].test(sentence);
-    }
-    
-    // Fallback to standard search for other words
-    const trimmedSentence = sentence.trim();
-    const trimmedWord = word.trim();
-    
-    if (!trimmedSentence || !trimmedWord) {
-      return false;
-    }
-    
-    return trimmedSentence.toLowerCase().includes(trimmedWord.toLowerCase());
+    this.connected = false;
+    this.reconnecting = false;
   }
 }
 
 class CallSession {
-  constructor(connection, appServices) {
-    this.connection = connection;
+  constructor(webSocket, appServices) {
+    this.ws = webSocket;
     this.services = appServices;
     this.callSid = null;
     this.streamSid = null;
     this.hasSeenMedia = false;
     this.active = true;
     this.hangupInitiated = false; // Flag to track if hangup has been initiated
-    this.packetCounter = 0; // Counter for packet sampling
+    this.receivedPackets = 0; // Counter for received packets
     
     // Explicitly bind all methods to this instance
     this._handleMessage = this._handleMessage.bind(this);
@@ -449,8 +424,18 @@ class CallSession {
     this.deepgram = this.sttService.connect();
     
     // Set up WebSocket event handlers
-    this.connection.on("message", this._handleMessage);
-    this.connection.on("close", this._handleClose);
+    this.ws.on("message", this._handleMessage);
+    this.ws.on("close", this._handleClose);
+    this.ws.on("error", (error) => {
+      logger.error("WebSocket error:", error);
+    });
+    
+    // Create packet statistics reporting timer
+    this.statsTimer = setInterval(() => {
+      if (this.receivedPackets > 0) {
+        logger.info(`Call statistics: received ${this.receivedPackets} packets`);
+      }
+    }, 10000); // Report every 10 seconds
     
     logger.info("New call session created");
   }
@@ -459,95 +444,147 @@ class CallSession {
     if (!this.active) return;
     
     try {
-      if (message.type === "utf8") {
-        const data = JSON.parse(message.utf8Data);
-        
-        // Log the first few messages completely to understand their structure
-        if (!this.hasSeenMedia) {
-          logger.debug("Twilio message structure:", JSON.stringify(data));
+      // Log raw message type and size for debugging
+      const msgType = typeof message;
+      const msgSize = Buffer.isBuffer(message) ? message.length : 
+                     (msgType === 'string' ? message.length : 'unknown');
+      logger.debug(`WebSocket message received: type=${msgType}, size=${msgSize}`);
+      
+      // With 'ws', message can be string or Buffer
+      let data;
+      let messageText;
+      
+      // Check if message is a Buffer (binary data) or string
+      if (Buffer.isBuffer(message)) {
+        try {
+          // For binary data, try to convert to string first
+          messageText = message.toString('utf8');
+          try {
+            data = JSON.parse(messageText);
+            logger.debug(`Successfully parsed binary message as JSON`);
+          } catch (e) {
+            // If it's not valid JSON, log the first part of the message
+            const sample = messageText.substring(0, 100);
+            logger.debug(`Binary message not valid JSON: ${sample}...`);
+            return;
+          }
+        } catch (e) {
+          // If we can't convert to string, log the raw binary data
+          const sample = message.length > 20 ? message.slice(0, 20).toString('hex') : message.toString('hex');
+          logger.debug(`Binary data (hex): ${sample}...`);
+          return;
         }
-        
-        switch (data.event) {
-          case "connected":
-            logger.info("Twilio: Connected event received");
-            break;
+      } else if (typeof message === 'string') {
+        // For string data, parse as JSON
+        messageText = message;
+        try {
+          data = JSON.parse(message);
+          logger.debug(`Successfully parsed string message as JSON`);
+        } catch (e) {
+          logger.debug(`String message not valid JSON: ${message.substring(0, 100)}...`);
+          return;
+        }
+      } else {
+        logger.warn(`Received message of unknown type: ${typeof message}`);
+        return;
+      }
+      
+      // Debug log the first few messages completely to understand format
+      if (!this.hasSeenMedia) {
+        logger.debug(`Complete message: ${messageText}`);
+      }
+      
+      switch (data.event) {
+        case "connected":
+          logger.info("Twilio: Connected event received");
+          break;
+          
+        case "start":
+          // Handle different possible structures of the start event
+          if (data.start && data.start.callSid) {
+            this.callSid = data.start.callSid;
+          } else if (data.callSid) {
+            this.callSid = data.callSid;
+          } else {
+            logger.warn("Twilio: Call started but could not find callSid in message", data);
+          }
+          
+          if (this.callSid) {
+            logger.info(`Twilio: Call started, SID: ${this.callSid}`);
+          }
+          break;
+          
+        case "media":
+          if (!this.hasSeenMedia) {
+            logger.info("Twilio: First media event received");
+            this.hasSeenMedia = true;
             
-          case "start":
-            // Handle different possible structures of the start event
-            if (data.start && data.start.callSid) {
-              this.callSid = data.start.callSid;
-            } else if (data.callSid) {
-              this.callSid = data.callSid;
-            } else {
-              logger.warn("Twilio: Call started but could not find callSid in message", data);
+            // Log detailed media packet info for debugging
+            if (data.media) {
+              logger.info(`Media packet info: track=${data.media.track}, chunk=${data.media.chunk}, timestamp=${data.media.timestamp}`);
             }
-            
-            if (this.callSid) {
-              logger.info(`Twilio: Call started, SID: ${this.callSid}`);
-            }
-            break;
-            
-          case "media":
-            if (!this.hasSeenMedia) {
-              logger.info("Twilio: First media event received");
-              this.hasSeenMedia = true;
-            }
-            
-            if (!this.streamSid && data.streamSid) {
-              this.streamSid = data.streamSid;
-              logger.info(`Twilio: Stream SID: ${this.streamSid}`);
-            }
-            
-            // Process the audio payload
-            if (data.media && data.media.payload) {
-              if (data.media.track === "inbound" || data.media.track === "outbound") {
-                try {
-                  // Apply sampling - only process 1 in every X packets to reduce load
-                  const packetNum = (this.packetCounter = (this.packetCounter || 0) + 1);
-                  if (packetNum % this.services.config.deepgram.sampleRate !== 0) {
-                    return; // Skip this packet based on sample rate
-                  }
-                  
-                  const payload = data.media.payload;
-                  
-                  // Calculate expected buffer size (base64 decoding)
-                  const estimatedSize = Math.ceil(payload.length * 0.75);
-                  
-                  // Get a buffer from the pool
-                  const buffer = audioBufferPool.get(estimatedSize);
-                  
-                  // Convert base64 to binary
-                  const rawAudio = Buffer.from(payload, 'base64');
-                  
-                  // Send to speech-to-text service
-                  this.sttService.send(rawAudio);
-                  
-                  // Return buffer to the pool after processing
-                  audioBufferPool.release(buffer);
-                } catch (error) {
-                  logger.error("Error processing audio payload", error);
+          }
+          
+          this.receivedPackets++;
+          
+          if (!this.streamSid && data.streamSid) {
+            this.streamSid = data.streamSid;
+            logger.info(`Twilio: Stream SID: ${this.streamSid}`);
+          }
+          
+          // Process the audio payload
+          if (data.media && data.media.payload) {
+            // Only process audio from the inbound track (what the caller is saying)
+            if (data.media.track === "inbound") {
+              try {
+                const payload = data.media.payload;
+                
+                // Decode the base64 audio data
+                const rawAudio = audioBufferPool.decodeBase64(payload);
+                if (!rawAudio) {
+                  logger.warn("Failed to decode audio payload");
+                  return;
                 }
+                
+                // Send to speech-to-text service
+                this.sttService.send(rawAudio);
+                
+              } catch (error) {
+                logger.error("Error processing audio payload", error);
+              }
+            } else {
+              // Log first outbound packet for debugging
+              if (this.receivedPackets < 5) {
+                logger.debug(`Received outbound audio packet, track: ${data.media.track}`);
               }
             }
-            break;
-            
-          case "mark":
-            logger.debug("Twilio: Mark event received", data);
-            break;
-            
-          case "close":
-            logger.info("Twilio: Close event received", data);
-            this._cleanup();
-            break;
-            
-          default:
-            logger.debug(`Twilio: Unknown event type: ${data.event}`);
-        }
-      } else if (message.type === "binary") {
-        logger.warn("Twilio: Binary message received (not supported)");
+          } else {
+            // Log media without payload
+            logger.debug("Received media event without payload");
+          }
+          break;
+          
+        case "mark":
+          logger.debug("Twilio: Mark event received", data);
+          break;
+          
+        case "close":
+          logger.info("Twilio: Close event received", data);
+          this._cleanup();
+          break;
+          
+        default:
+          logger.debug(`Twilio: Unknown event type: ${data.event}`);
       }
     } catch (error) {
       logger.error("Error processing message", error);
+      // Log a sample of the message for debugging
+      if (message) {
+        const sample = Buffer.isBuffer(message) 
+          ? `Binary message of length ${message.length}` 
+          : `Message: ${typeof message === 'string' ? message.substring(0, 100) : typeof message}`;
+        logger.error(`Message sample: ${sample}`);
+      }
     }
   }
 
@@ -629,60 +666,37 @@ class CallSession {
       this.active = false;
       this.hangupInitiated = false; // Reset the hangup flag for any future use of this object
       
+      // Stop statistics timer
+      if (this.statsTimer) {
+        clearInterval(this.statsTimer);
+        this.statsTimer = null;
+      }
+      
       // Clean up STT service
       if (this.sttService) {
         this.sttService.cleanup();
+        this.sttService = null;
       }
       
-      logger.info(`Call session cleaned up, Call SID: ${this.callSid}`);
+      // Make sure to terminate the websocket if still open
+      if (this.ws) {
+        try {
+          if (this.ws.readyState === WebSocket.OPEN) {
+            this.ws.terminate();
+          }
+          this.ws.removeAllListeners(); // Remove all event listeners
+        } catch (err) {
+          logger.error("Error terminating WebSocket", err);
+        }
+        this.ws = null;
+      }
+      
+      logger.info(`Call session cleaned up, Call SID: ${this.callSid || 'unknown'}, processed ${this.receivedPackets} packets`);
     } catch (error) {
       logger.error("Error during session cleanup", error);
     }
   }
 }
-
-// Audio buffer management for reusing Buffer objects
-const audioBufferPool = {
-  buffers: [],
-  maxSize: 20, // Maximum number of buffers to keep in the pool
-  
-  // Get a buffer of appropriate size
-  get(size) {
-    // Find a buffer of suitable size if available
-    for (let i = 0; i < this.buffers.length; i++) {
-      if (this.buffers[i].length >= size) {
-        return this.buffers.splice(i, 1)[0];
-      }
-    }
-    // Create a new buffer if none available
-    return Buffer.allocUnsafe(size);
-  },
-  
-  // Return a buffer to the pool
-  release(buffer) {
-    if (buffer && Buffer.isBuffer(buffer) && this.buffers.length < this.maxSize) {
-      this.buffers.push(buffer);
-    }
-  },
-  
-  // Decode base64 string to a buffer
-  decodeBase64(base64String) {
-    try {
-      if (!base64String) return null;
-      
-      // Standard Node.js base64 decoding
-      return Buffer.from(base64String, 'base64');
-    } catch (error) {
-      logger.error("Error decoding base64", error);
-      return null;
-    }
-  },
-  
-  // Clear all buffers in the pool
-  clear() {
-    this.buffers = [];
-  }
-};
 
 class VoiceServer {
   constructor() {
@@ -696,17 +710,27 @@ class VoiceServer {
     // Set up HTTP server
     this.httpServer = http.createServer(this._handleHttpRequest.bind(this));
     
-    // Set up WebSocket server using 'ws' package
-    this.wsServer = new WebSocket.Server({
+    // Set WebSocket options for the server
+    const wsOptions = {
       server: this.httpServer,
-      // No origin validation for compatibility with Twilio
-    });
+      // The following options are important for handling Twilio's WebSocket streams
+      perMessageDeflate: false, // Disable compression for better voice streaming performance
+      maxPayload: 65536, // 64KB max message size to handle audio chunks
+      // Allow binary frames directly
+      handleProtocols: () => true
+    };
+    
+    // Set up WebSocket server using 'ws' package
+    this.wsServer = new WebSocket.Server(wsOptions);
     
     // Set up WebSocket handlers
     this._setupWebSocketHandlers();
     
     // Call sessions map
     this.sessions = new Map();
+    
+    // Server state
+    this.isShuttingDown = false;
   }
 
   _handleHttpRequest(req, res) {
@@ -728,6 +752,14 @@ class VoiceServer {
     this.wsServer.on('connection', (ws, req) => {
       logger.info("New WebSocket connection established");
       
+      // Debug the WebSocket connection
+      logger.info(`WebSocket connection headers: ${JSON.stringify(req.headers['sec-websocket-protocol'] || 'none')}`);
+      
+      // Debug raw message handler to trace all incoming data
+      ws._socket.on('data', (data) => {
+        logger.debug(`Raw WebSocket data received: ${data.length} bytes`);
+      });
+      
       // Create a new call session for this connection
       const session = new CallSession(ws, this.services);
       
@@ -739,7 +771,8 @@ class VoiceServer {
       this.sessions.set(sessionId, session);
       
       // Remove the session when the connection closes
-      ws.on('close', () => {
+      ws.on('close', (code, reason) => {
+        logger.info(`WebSocket closed with code ${code}, reason: ${reason || 'none'}`);
         this.sessions.delete(sessionId);
         logger.info(`Session ${sessionId} removed`);
       });
