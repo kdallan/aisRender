@@ -25,7 +25,7 @@ const audioBufferPool = {
 // Logging system
 const logger = {
     info(message, data) {
-        console.log(`${message}`, data || "");
+        console.error(`${message}`, data || ""); // Apparently .error logs faster ?
     },
     error(message, error) {
         console.error(`[ERROR] ${message}`, error);
