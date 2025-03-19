@@ -466,18 +466,27 @@ class CallSession {
                 // Utilize finalize() since we're stripping out quiet
                 // sections with _hasAudioEnergy()
                 
-                this.sttService.finalize();
+                this.sendFinalize();
             }
         }
         
         this.startFlushTimer();
     }
     
+    sendFinalize() {
+        const jsonMessage = JSON.stringify({
+          type: "Finalize"
+        });
+
+        // Send as text rather than binary
+        this.sttService.send(jsonMessage, { binary: false });       
+    }
+    
     finalizeAudioBuffer() {
     	this.stopFinalizeTimer();
         
 		if (this.sttService && this.sttService.connected) {
-  			this.sttDervice.finalize();      
+  			this.sendFinalize();
   		}
 
 		this.startFinalizeTimer();
