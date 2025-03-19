@@ -85,7 +85,7 @@ const config = {
                     endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
                     utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
                 },
-                throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 60
+                throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 70
             },
             punctuation: {
                 chars: [".", ",", "!", "?", ";", ":"]
