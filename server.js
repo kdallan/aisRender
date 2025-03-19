@@ -445,7 +445,7 @@ class CallSession {
         this.startFlushTimer();
     }
     
-    _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0xE7) {
+    _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0x68) {
         try {
             const binary = Buffer.from(base64Payload, "base64");
             if (binary.length < 10) return true;
@@ -453,17 +453,17 @@ class CallSession {
             let nonSilenceCount = 0;
             let samples = 0;
             
-            const hexValues = []; // Array to store hex values        
+            // const hexValues = []; // Array to store hex values        
             
-            for (let i = 0; i < binary.length; i += 15) { // adjust sampling as needed
+            for (let i = 0; i < binary.length; i += 8) { // adjust sampling as needed
                 samples++;
                 const byte = binary[i];
-                hexValues.push(byte.toString(16).padStart(2, "0"));           
+                // hexValues.push(byte.toString(16).padStart(2, "0"));           
                 if (byte < mulawThreshold) nonSilenceCount++;
             }
             
             // Log all sampled hex byte values in one line
-            logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
+            // logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
             
             const ratio = nonSilenceCount / samples;
             return ratio > threshold;
