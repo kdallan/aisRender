@@ -392,67 +392,85 @@ class CallSession {
         logger.info("New call session created");
     }
     
+    stopFlushTimer() {
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }    
+    }    
+    
+    startFlushTimer() {
+    
+		// Cancel the previous timer, if any        
+		this.stopFlushTimer();
+        
+        if( this.isShuttingDown ) {
+        	return;
+        }
+            
+        // Schedule the timer
+        this.flushTimer = setTimeout(() => {
+            this.flushAudioBuffer();
+        }, this.flushInterval);
+    }
+    
     accumulateAudio(buffer) {
         // Add buffer and update size
         this.audioAccumulator.push(buffer);
         this.audioAccumulatorSize += buffer.length;
-        // If no flush timer is set, schedule one
-        if (!this.flushTimer) {
-            this.flushTimer = setTimeout(this.flushAudioBuffer, this.flushInterval);
-        }
+
         // If accumulated size exceeds threshold, flush immediately
         if (this.audioAccumulatorSize >= this.bufferSizeThreshold) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
             this.flushAudioBuffer();
         }
     }
     
     flushAudioBuffer() {
-        // Clear any existing timer
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
+    	this.stopFlushTimer();
+
+        if (this.audioAccumulatorSize > 0) {
+            // Combine the accumulated buffers
+            const combinedBuffer = Buffer.concat(this.audioAccumulator);
+            // If Deepgram is connected, send the audio and clear the buffer
+            if (this.sttService && this.sttService.connected) {
+            
+                logger.debug( `Flushing ${this.audioAccumulator.length} buffers, total size: ${combinedBuffer.length} bytes` );
+                
+                this.sttService.send(combinedBuffer);
+                this.audioAccumulator = [];
+                this.audioAccumulatorSize = 0;
+            }
         }
-        if (this.audioAccumulator.length === 0) return;
         
-        // Combine the accumulated buffers
-        const combinedBuffer = Buffer.concat(this.audioAccumulator);
-        // If Deepgram is connected, send the audio and clear the buffer
-        if (this.sttService && this.sttService.connected) {
-            logger.debug(
-                         `Flushing ${this.audioAccumulator.length} buffers, total size: ${combinedBuffer.length} bytes`
-                         );
-            this.sttService.send(combinedBuffer);
-            this.audioAccumulator = [];
-            this.audioAccumulatorSize = 0;
-        } else {
-            logger.warn("Deepgram is not connected; rescheduling flush.");
-            // If not connected, reschedule the flush
-            this.flushTimer = setTimeout(this.flushAudioBuffer, this.flushInterval);
-        }
+        this.startFlushTimer();
     }
     
     _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0xE7) {
-      try {
-        const binary = Buffer.from(base64Payload, "base64");
-        if (binary.length < 10) return true;
-
-        let nonSilenceCount = 0;
-        let samples = 0;
-
-        for (let i = 0; i < binary.length; i += 15) { // adjust sampling as needed
-          samples++;
-          const byte = binary[i];
-          if (byte < mulawThreshold) nonSilenceCount++;
+        try {
+            const binary = Buffer.from(base64Payload, "base64");
+            if (binary.length < 10) return true;
+            
+            let nonSilenceCount = 0;
+            let samples = 0;
+            
+            const hexValues = []; // Array to store hex values        
+            
+            for (let i = 0; i < binary.length; i += 15) { // adjust sampling as needed
+                samples++;
+                const byte = binary[i];
+                hexValues.push(byte.toString(16).padStart(2, "0"));           
+                if (byte < mulawThreshold) nonSilenceCount++;
+            }
+            
+            // Log all sampled hex byte values in one line
+            logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
+            
+            const ratio = nonSilenceCount / samples;
+            return ratio > threshold;
+        } catch (error) {
+            logger.debug("Error checking audio energy", error);
+            return true;
         }
-
-        const ratio = nonSilenceCount / samples;
-        return ratio > threshold;
-      } catch (error) {
-        logger.debug("Error checking audio energy", error);
-        return true;
-      }
     }
     
     _handleMessage(message) {
