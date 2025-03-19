@@ -316,6 +316,8 @@ class DeepgramSTTService {
         }
     }
     
+    
+    
     cleanup() {
         this.isShuttingDown = true;
         if (this.keepAliveInterval) {
@@ -354,9 +356,11 @@ class CallSession {
         // Audio buffering
         this.audioAccumulator = [];
         this.audioAccumulatorSize = 0;
-        this.bufferSizeThreshold = 16 * 1024; // 16 KB
+        this.bufferSizeThreshold = 2 * 1024; // 2 KB
         this.flushTimer = null;
+        this.finalizeTimer = null;
         this.flushInterval = this.services.config.deepgram.throttleInterval;
+        this.finalizeInterval = 50; // Max: 50 finalize per second (here we're doing 20/s)
         
         // Bind methods
         this._handleMessage = this._handleMessage.bind(this);
@@ -397,14 +401,20 @@ class CallSession {
             clearTimeout(this.flushTimer);
             this.flushTimer = null;
         }    
-    }    
+    }
+    
+    stopFinalizeTimer() {
+    	if (this.finalizeTimer) {
+     		clearTimeout(this.finalizeTimer);
+       		this.finalizeTimer = null;
+        }
+    }
     
     startFlushTimer() {
-    
 		// Cancel the previous timer, if any        
 		this.stopFlushTimer();
         
-        if( this.isShuttingDown ) {
+        if (this.isShuttingDown) {
         	return;
         }
             
@@ -412,6 +422,19 @@ class CallSession {
         this.flushTimer = setTimeout(() => {
             this.flushAudioBuffer();
         }, this.flushInterval);
+    }
+    
+    startFinalizeTimer() {
+    	stopFinalizeTimer();
+     
+     	if (this.isShuttingDown ) {
+      		return;
+        }
+        
+        // Schedule the timer
+        this.finalizeTimer = setTimeout(() => {
+            this.finalizeAudioBuffer();
+        }, this.finalizeInterval);
     }
     
     accumulateAudio(buffer) {
@@ -439,39 +462,53 @@ class CallSession {
                 this.sttService.send(combinedBuffer);
                 this.audioAccumulator = [];
                 this.audioAccumulatorSize = 0;
+                
+                // Utilize finalize() since we're stripping out quiet
+                // sections with _hasAudioEnergy()
+                
+                this.sttService.finalize();
             }
         }
         
         this.startFlushTimer();
     }
     
+    finalizeAudioBuffer() {
+    	this.stopFinalizeTimer();
+        
+		if (this.sttService && this.sttService.connected) {
+  			this.sttDervice.finalize();      
+  		}
+
+		this.startFinalizeTimer();
+    }
+    
     _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0x68) {
-    	return true;
-//        try {
-//            const binary = Buffer.from(base64Payload, "base64");
-//            if (binary.length < 10) return true;
-//            
-//            let nonSilenceCount = 0;
-//            let samples = 0;
-//            
-//            // const hexValues = []; // Array to store hex values        
-//            
-//            for (let i = 0; i < binary.length; i += 8) { // adjust sampling as needed
-//                samples++;
-//                const byte = binary[i];
-//                // hexValues.push(byte.toString(16).padStart(2, "0"));           
-//                if (byte < mulawThreshold) nonSilenceCount++;
-//            }
-//            
-//            // Log all sampled hex byte values in one line
-//            // logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
-//            
-//            const ratio = nonSilenceCount / samples;
-//            return ratio > threshold;
-//        } catch (error) {
-//            logger.debug("Error checking audio energy", error);
-//            return true;
-//        }
+        try {
+            const binary = Buffer.from(base64Payload, "base64");
+            if (binary.length < 10) return true;
+            
+            let nonSilenceCount = 0;
+            let samples = 0;
+            
+            // const hexValues = []; // Array to store hex values        
+            
+            for (let i = 0; i < binary.length; i += 8) { // adjust sampling as needed
+                samples++;
+                const byte = binary[i];
+                // hexValues.push(byte.toString(16).padStart(2, "0"));           
+                if (byte < mulawThreshold) nonSilenceCount++;
+            }
+            
+            // Log all sampled hex byte values in one line
+            // logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
+            
+            const ratio = nonSilenceCount / samples;
+            return ratio > threshold;
+        } catch (error) {
+            logger.debug("Error checking audio energy", error);
+            return true;
+        }
     }
     
     _handleMessage(message) {
