@@ -83,7 +83,7 @@ const config = {
                     no_delay: true,
                     interim_results: true,
                     endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 0,
-                    utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
+                    utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 0
                 },
                 throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 50
             },
