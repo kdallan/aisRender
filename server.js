@@ -25,7 +25,7 @@ const audioBufferPool = {
 // Logging system
 const logger = {
     info(message, data) {
-        console.log(`[INFO] ${message}`, data || "");
+        console.log(`${message}`, data || "");
     },
     error(message, error) {
         console.error(`[ERROR] ${message}`, error);
@@ -85,7 +85,7 @@ const config = {
                     endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
                     utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
                 },
-                throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 70
+                throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 55
             },
             punctuation: {
                 chars: [".", ",", "!", "?", ";", ":"]
@@ -384,7 +384,7 @@ class CallSession {
         this.statsTimer = setInterval(() => {
             if (this.receivedPackets > 0) {
                 logger.info(
-                            `Call statistics: total=${this.receivedPackets}, inbound=${this.inboundPackets}, outbound=${this.outboundPackets}, silence=${this.silencePackets}`
+                            `Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}, outbound=${this.outboundPackets}, silence=${this.silencePackets}`
                             );
             }
         }, 10000);
@@ -589,9 +589,9 @@ class CallSession {
         if (!this.active || this.hangupInitiated) return;
         try {
             if (isFinal) {
-                logger.info(`Deepgram STT: [Final] ${transcript}`);
+                logger.info(`F] ${transcript}`);
             } else {
-                logger.info(`Deepgram STT: [Interim] ${transcript}`);
+                logger.info(`${transcript}`);
             }
             if (
                 this.services.textUtils.searchWordInSentence(transcript, "hangup") ||
