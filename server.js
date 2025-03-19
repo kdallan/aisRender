@@ -466,7 +466,7 @@ class CallSession {
                 // Utilize finalize() since we're stripping out quiet
                 // sections with _hasAudioEnergy()
                 
-                this.sendFinalize();
+                // this.sendFinalize();
             }
         }
         
@@ -491,31 +491,32 @@ class CallSession {
     }
     
     _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0x68) {
-        try {
-            const binary = Buffer.from(base64Payload, "base64");
-            if (binary.length < 10) return true;
-            
-            let nonSilenceCount = 0;
-            let samples = 0;
-            
-            // const hexValues = []; // Array to store hex values        
-            
-            for (let i = 0; i < binary.length; i += 8) { // adjust sampling as needed
-                samples++;
-                const byte = binary[i];
-                // hexValues.push(byte.toString(16).padStart(2, "0"));           
-                if (byte < mulawThreshold) nonSilenceCount++;
-            }
-            
-            // Log all sampled hex byte values in one line
-            // logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
-            
-            const ratio = nonSilenceCount / samples;
-            return ratio > threshold;
-        } catch (error) {
-            logger.debug("Error checking audio energy", error);
-            return true;
-        }
+    	return true;
+//        try {
+//            const binary = Buffer.from(base64Payload, "base64");
+//            if (binary.length < 10) return true;
+//            
+//            let nonSilenceCount = 0;
+//            let samples = 0;
+//            
+//            // const hexValues = []; // Array to store hex values        
+//            
+//            for (let i = 0; i < binary.length; i += 8) { // adjust sampling as needed
+//                samples++;
+//                const byte = binary[i];
+//                // hexValues.push(byte.toString(16).padStart(2, "0"));           
+//                if (byte < mulawThreshold) nonSilenceCount++;
+//            }
+//            
+//            // Log all sampled hex byte values in one line
+//            // logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
+//            
+//            const ratio = nonSilenceCount / samples;
+//            return ratio > threshold;
+//        } catch (error) {
+//            logger.debug("Error checking audio energy", error);
+//            return true;
+//        }
     }
     
     _handleMessage(message) {
