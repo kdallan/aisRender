@@ -474,12 +474,10 @@ class CallSession {
     }
     
     sendFinalize() {
-        const jsonMessage = JSON.stringify({
-          type: "Finalize"
-        });
-
-        // Send as text rather than binary
-        this.sttService.send(jsonMessage, { binary: false });       
+        this.sttService.send(
+            JSON.stringify({
+            	type: "Finalize",
+            }));       
     }
     
     finalizeAudioBuffer() {
