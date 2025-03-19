@@ -82,10 +82,10 @@ const config = {
                     multichannel: false,
                     no_delay: true,
                     interim_results: true,
-                    endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
-                    utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
+                    endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 250,
+                    utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 850
                 },
-                throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 50
+                throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 100
             },
             punctuation: {
                 chars: [".", ",", "!", "?", ";", ":"]
