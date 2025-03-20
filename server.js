@@ -1,791 +1,586 @@
 // Import required modules
-const fs = require("fs");
 const http = require("http");
-const path = require("path");
 const WebSocket = require("ws");
 const url = require("url");
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
-const STRIP_SILENCE = false;
+require("dotenv").config();
 
-// Audio buffer utility for decoding base64
-const audioBufferPool = {
-    decodeBase64(base64String) {
-        try {
-            if (!base64String) return null;
-            return Buffer.from(base64String, "base64");
-        } catch (error) {
-            logger.error("Error decoding base64", error);
-            return null;
-        }
-    },
-    clear() {
-        // No resources to clear
-    }
+// Simplified logger
+const log = {
+  info: (msg, data) => console.log(`${msg}`, data || ""),
+  error: (msg, err) => console.error(`[ERROR] ${msg}`, err || ""),
+  warn: (msg, data) => console.warn(`[WARN] ${msg}`, data || ""),
+  debug: (msg, data) => process.env.DEBUG && console.log(`[DEBUG] ${msg}`, data || "")
 };
 
-// Logging system
-const logger = {
-    info(message, data) {
-        console.log(`${message}`, data || "");
+// Configuration
+const config = (() => {
+  // Check required environment variables
+  ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "DEEPGRAM_API_KEY"].forEach(varName => {
+    if (!process.env[varName]) throw new Error(`Missing required environment variable: ${varName}`);
+  });
+  
+  return {
+    server: {
+      port: parseInt(process.env.HTTP_SERVER_PORT) || 8080
     },
-    error(message, error) {
-        console.error(`[ERROR] ${message}`, error);
+    twilio: {
+      accountSid: process.env.TWILIO_ACCOUNT_SID,
+      authToken: process.env.TWILIO_AUTH_TOKEN,
+      studioFlowId: process.env.TWILIO_STUDIO_FLOW_ID || "FWe2a7c39cffcbe604f2f158b68aae3b19"
     },
-    warn(message, data) {
-        console.warn(`[WARN] ${message}`, data || "");
+    deepgram: {
+      apiKey: process.env.DEEPGRAM_API_KEY,
+      ttsWebsocketURL: process.env.DEEPGRAM_TTS_WS_URL || 
+        "wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none",
+      sttConfig: {
+        model: process.env.DEEPGRAM_MODEL || "nova-2-phonecall",
+        language: process.env.DEEPGRAM_LANGUAGE || "en",
+        encoding: "mulaw",
+        sample_rate: 8000,
+        channels: 1,
+        no_delay: true,
+        interim_results: true,
+        endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 10,
+        utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
+      },
+      throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 30
     },
-    debug(message, data) {
-        if (process.env.DEBUG) {
-            console.log(`[DEBUG] ${message}`, data || "");
-        }
-    },
-    trace(message, data) {
-        if (process.env.TRACE) {
-            console.log(`[TRACE] ${message}`, data || "");
-        }
+    commands: {
+      hangup: /\b(hangup|hang up)\b/i,
+      goodbye: /\b(goodbye|good bye)\b/i
     }
-};
+  };
+})();
 
-// Configuration management
-const config = {
-    init() {
-        require("dotenv").config();
-        const requiredEnvVars = [
-            "TWILIO_ACCOUNT_SID",
-            "TWILIO_AUTH_TOKEN",
-            "DEEPGRAM_API_KEY"
-        ];
-        const missingVars = requiredEnvVars.filter((varName) => !process.env[varName]);
-        if (missingVars.length > 0) {
-            throw new Error(`Missing required environment variables: ${missingVars.join(", ")}`);
-        }
-        return {
-            server: {
-                port: parseInt(process.env.HTTP_SERVER_PORT) || 8080
-            },
-            twilio: {
-                accountSid: process.env.TWILIO_ACCOUNT_SID,
-                authToken: process.env.TWILIO_AUTH_TOKEN,
-                studioFlowId: process.env.TWILIO_STUDIO_FLOW_ID || "FWe2a7c39cffcbe604f2f158b68aae3b19"
-            },
-            deepgram: {
-                apiKey: process.env.DEEPGRAM_API_KEY,
-            ttsWebsocketURL:
-                process.env.DEEPGRAM_TTS_WS_URL ||
-                "wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none",
-                sttConfig: {
-                    model: process.env.DEEPGRAM_MODEL || "nova-2-phonecall",
-                    language: process.env.DEEPGRAM_LANGUAGE || "en",
-                    smart_format: false,
-                    encoding: "mulaw",
-                    sample_rate: 8000,
-                    channels: 1,
-                    multichannel: false,
-                    no_delay: true,
-                    interim_results: true,
-                    endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 10,
-                    utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
-                },
-                throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 30
-            },
-            punctuation: {
-                chars: [".", ",", "!", "?", ";", ":"]
-            }
-        };
-    }
-};
-
-class TextUtils {
-    constructor(config) {
-        this.puntuationChars = config.chars;
-        this.commandPatterns = {
-            hangup: /\b(hangup|hang up)\b/i,
-            goodbye: /\b(goodbye|good bye)\b/i
-        };
-    }
-        
-    searchWordInSentence(sentence, word) {
-        if (!sentence || !word || typeof sentence !== "string" || typeof word !== "string") {
-            return false;
-        }
-        if (this.commandPatterns[word.toLowerCase()]) {
-            return this.commandPatterns[word.toLowerCase()].test(sentence);
-        }
-        const trimmedSentence = sentence.trim();
-        const trimmedWord = word.trim();
-        if (!trimmedSentence || !trimmedWord) {
-            return false;
-        }
-        return trimmedSentence.toLowerCase().includes(trimmedWord.toLowerCase());
-    }
-}
-
+// TwilioService
 class TwilioService {
-    constructor(config) {
-        this.config = config;
-        this.client = require("twilio")(config.accountSid, config.authToken);
-        this.VoiceResponse = require("twilio").twiml.VoiceResponse;
+  constructor(config) {
+    this.config = config;
+    this.client = require("twilio")(config.accountSid, config.authToken);
+    this.VoiceResponse = require("twilio").twiml.VoiceResponse;
+  }
+  
+  async hangupCall(callSid) {
+    try {
+      log.info(`Initiating hangup for call: ${callSid}`);
+      const execution = await this.client.studio.v2
+        .flows(this.config.studioFlowId)
+        .executions(callSid);
+      log.info("Call hangup executed", { executionSid: execution.sid });
+      return execution;
+    } catch (error) {
+      log.error("Failed to hangup call", error);
+      throw error;
     }
+  }
+  
+  async sayPhraseAndHangup(callSid, phrase) {
+    if (!callSid) throw new Error("Call SID is required");
     
-    async hangupCall(callSid) {
-        try {
-            logger.info(`Initiating hangup for call: ${callSid}`);
-            const execution = await this.client.studio.v2
-            .flows(this.config.studioFlowId)
-            .executions(callSid);
-            logger.info("Call hangup executed", { executionSid: execution.sid });
-            return execution;
-        } catch (error) {
-            logger.error("Failed to hangup call", error);
-            throw error;
-        }
+    try {
+      log.info(`Saying phrase and hanging up call ${callSid}: "${phrase}"`);
+      const twiml = new this.VoiceResponse();
+      twiml.say({ voice: "Polly.Amy-Neural", language: "en-US" }, phrase);
+      twiml.hangup();
+      
+      const result = await this.client.calls(callSid).update({ twiml: twiml.toString() });
+      log.info(`Call ${callSid} successfully updated with TwiML`);
+      return result;
+    } catch (error) {
+      log.error(`Failed to update call ${callSid} with TwiML`, error);
+      throw error;
     }
-    
-    generateSayAndHangupTwiML(phrase, options = {}) {
-        try {
-            const twiml = new this.VoiceResponse();
-            const voiceOptions = {
-                voice: options.voice || "Polly.Amy-Neural",
-                language: options.language || "en-US",
-                ...options
-            };
-            twiml.say(voiceOptions, phrase);
-            twiml.hangup();
-            return twiml.toString();
-        } catch (error) {
-            logger.error("Error generating TwiML", error);
-            const fallbackTwiml = new this.VoiceResponse();
-            fallbackTwiml.say("Sorry, an error occurred.");
-            fallbackTwiml.hangup();
-            return fallbackTwiml.toString();
-        }
-    }
-    
-    async sayPhraseAndHangup(callSid, phrase) {
-        try {
-            if (!callSid) {
-                throw new Error("Call SID is required");
-            }
-            logger.info(`Saying phrase and hanging up call ${callSid}: "${phrase}"`);
-            const twiml = this.generateSayAndHangupTwiML(phrase);
-            const result = await this.client.calls(callSid).update({ twiml });
-            logger.info(`Call ${callSid} successfully updated with TwiML`);
-            return result;
-        } catch (error) {
-            logger.error(`Failed to update call ${callSid} with TwiML`, error);
-            throw error;
-        }
-    }
+  }
 }
 
+// DeepgramSTTService
 class DeepgramSTTService {
-    constructor(config, onTranscript, onUtteranceEnd) {
-        this.config = config;
-        this.onTranscript = onTranscript;
-        this.onUtteranceEnd = onUtteranceEnd;
-        this.client = createClient(config.apiKey);
-        this.keepAliveInterval = null;
-        this.deepgram = null;
-        this.isFinals = [];
-        this.connected = false;
-        this.reconnecting = false;
-        this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
-        this.reconnectDelay = 1000;
-        this.isShuttingDown = false;
-        logger.info("STT Service: Initialized Deepgram service");
-    }
+  constructor(config, onTranscript, onUtteranceEnd) {
+    this.config = config;
+    this.onTranscript = onTranscript;
+    this.onUtteranceEnd = onUtteranceEnd;
+    this.client = createClient(config.apiKey);
+    this.deepgram = null;
+    this.isFinals = [];
+    this.connected = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 1000;
+    this.isShuttingDown = false;
+    this.keepAliveInterval = null;
     
-    connect() {
-        if (this.isShuttingDown) {
-            logger.info("Shutdown in progress, not connecting to Deepgram.");
-            return;
-        }
-        try {
-            if (this.reconnecting) {
-                logger.info(`Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`);
-            } else {
-                logger.info("Connecting to Deepgram...");
-            }
-            this.deepgram = this.client.listen.live(this.config.sttConfig);
-            if (this.keepAliveInterval) {
-                clearInterval(this.keepAliveInterval);
-            }
-            this.keepAliveInterval = setInterval(() => {
-                if (this.deepgram && this.connected) {
-                    this.deepgram.keepAlive();
-                }
-            }, 10 * 1000);
-            this._setupEventListeners();
-            return this.deepgram;
-        } catch (error) {
-            logger.error("Failed to connect to Deepgram STT", error);
-            this._handleConnectionFailure();
-            return null;
-        }
-    }
+    this.connect();
+  }
+  
+  connect() {
+    if (this.isShuttingDown) return;
     
-    _handleConnectionFailure() {
-        this.connected = false;
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnecting = true;
-            this.reconnectAttempts++;
-            const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-            logger.info(`Will attempt to reconnect in ${delay}ms...`);
-            setTimeout(() => {
-                this.connect();
-            }, delay);
+    try {
+      log.info(this.reconnectAttempts > 0 
+        ? `Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`
+        : "Connecting to Deepgram...");
+      
+      this.deepgram = this.client.listen.live(this.config.sttConfig);
+      
+      if (this.keepAliveInterval) clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = setInterval(() => {
+        if (this.deepgram && this.connected) this.deepgram.keepAlive();
+      }, 10000);
+      
+      this._setupEventListeners();
+      return this.deepgram;
+    } catch (error) {
+      log.error("Failed to connect to Deepgram STT", error);
+      this._handleConnectionFailure();
+      return null;
+    }
+  }
+  
+  _handleConnectionFailure() {
+    this.connected = false;
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+      log.info(`Will attempt to reconnect in ${delay}ms...`);
+      setTimeout(() => this.connect(), delay);
+    } else {
+      log.error(`Failed to reconnect after ${this.maxReconnectAttempts} attempts`);
+      this.reconnectAttempts = 0;
+    }
+  }
+  
+  _setupEventListeners() {
+    // Open event
+    this.deepgram.addListener(LiveTranscriptionEvents.Open, () => {
+      log.info("Deepgram STT connection opened");
+      this.connected = true;
+      this.reconnectAttempts = 0;
+      
+      // Transcript event
+      this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        if (!transcript) return;
+        
+        if (!data.is_final) {
+          this.onTranscript?.(transcript, false);
+          return;
+        }
+        
+        this.isFinals.push(transcript);
+        if (data.speech_final) {
+          this.onTranscript?.(this.isFinals.join(" "), true);
+          this.isFinals = [];
         } else {
-            logger.error(`Failed to reconnect after ${this.maxReconnectAttempts} attempts`);
-            this.reconnecting = false;
-            this.reconnectAttempts = 0;
+          this.onTranscript?.(transcript, true);
         }
-    }
+      });
+      
+      // Utterance end event
+      this.deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, () => {
+        if (this.isFinals.length > 0) {
+          this.onUtteranceEnd?.(this.isFinals.join(" "));
+          this.isFinals = [];
+        }
+      });
+    });
     
-    _setupEventListeners() {
-        this.deepgram.addListener(LiveTranscriptionEvents.Open, () => {
-            logger.info("Deepgram STT connection opened");
-            this.connected = true;
-            this.reconnecting = false;
-            this.reconnectAttempts = 0;
-            this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-                try {
-                    if (!data.is_final) {
-                        const transcript = data.channel?.alternatives?.[0]?.transcript;
-                        if (transcript) {
-                            this.onTranscript && this.onTranscript(transcript, false);
-                        }
-                        return;
-                    }
-                    const transcript = data.channel?.alternatives?.[0]?.transcript;
-                    if (!transcript) return;
-                    this.isFinals.push(transcript);
-                    if (data.speech_final) {
-                        const utterance = this.isFinals.join(" ");
-                        this.isFinals = [];
-                        this.onTranscript && this.onTranscript(utterance, true);
-                    } else {
-                        this.onTranscript && this.onTranscript(transcript, true);
-                    }
-                } catch (error) {
-                    logger.error("Error processing transcript data", error);
-                }
-            });
-            this.deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, () => {
-                if (this.isFinals.length > 0) {
-                    const utterance = this.isFinals.join(" ");
-                    this.isFinals = [];
-                    this.onUtteranceEnd && this.onUtteranceEnd(utterance);
-                }
-            });
-        });
-        this.deepgram.addListener(LiveTranscriptionEvents.Close, () => {
-            logger.info("Deepgram STT connection closed");
-            this.connected = false;
-            this._handleConnectionFailure();
-        });
-        this.deepgram.addListener(LiveTranscriptionEvents.Error, (error) => {
-            logger.error("Deepgram STT error", error);
-            if (!this.connected) {
-                this._handleConnectionFailure();
-            }
-        });
-        this.deepgram.addListener(LiveTranscriptionEvents.Warning, (warning) => {
-            logger.warn("Deepgram STT warning", warning);
-        });
-    }
+    // Error and close events
+    this.deepgram.addListener(LiveTranscriptionEvents.Close, () => {
+      log.info("Deepgram STT connection closed");
+      this.connected = false;
+      this._handleConnectionFailure();
+    });
     
-    send(audioData) {
-        if (!this.connected || !this.deepgram) {
-            logger.debug("Not sending audio because connection is not open");
-            return;
-        }
-        if (!audioData || !Buffer.isBuffer(audioData) || audioData.length === 0) return;
-        try {
-            this.deepgram.send(audioData);
-        } catch (error) {
-            logger.error("Failed to send audio to Deepgram", error);
-            if (error.message && error.message.includes("not open")) {
-                this.connected = false;
-                this._handleConnectionFailure();
-            }
-        }
-    }
-
-    cleanup() {
-        this.isShuttingDown = true;
-        if (this.keepAliveInterval) {
-            clearInterval(this.keepAliveInterval);
-            this.keepAliveInterval = null;
-        }
-        if (this.deepgram) {
-            try {
-                this.deepgram.requestClose();
-            } catch (error) {
-                logger.error("Error while closing Deepgram connection", error);
-            }
-            this.deepgram = null;
-        }
+    this.deepgram.addListener(LiveTranscriptionEvents.Error, (error) => {
+      log.error("Deepgram STT error", error);
+      if (!this.connected) this._handleConnectionFailure();
+    });
+    
+    this.deepgram.addListener(LiveTranscriptionEvents.Warning, (warning) => {
+      log.warn("Deepgram STT warning", warning);
+    });
+  }
+  
+  send(audioData) {
+    if (!this.connected || !this.deepgram || !audioData || !Buffer.isBuffer(audioData) || audioData.length === 0) return;
+    
+    try {
+      this.deepgram.send(audioData);
+    } catch (error) {
+      log.error("Failed to send audio to Deepgram", error);
+      if (error.message?.includes("not open")) {
         this.connected = false;
-        this.reconnecting = false;
+        this._handleConnectionFailure();
+      }
     }
+  }
+  
+  cleanup() {
+    this.isShuttingDown = true;
+    
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+    }
+    
+    if (this.deepgram) {
+      try {
+        this.deepgram.requestClose();
+      } catch (error) {
+        log.error("Error while closing Deepgram connection", error);
+      }
+      this.deepgram = null;
+    }
+    
+    this.connected = false;
+  }
 }
 
+// CallSession
 class CallSession {
-    constructor(webSocket, appServices) {
-        this.ws = webSocket;
-        this.services = appServices;
-        this.callSid = null;
-        this.streamSid = null;
-        this.hasSeenMedia = false;
-        this.active = true;
-        this.hangupInitiated = false;
-        
-        // Packet counters
-        this.receivedPackets = 0;
-        this.inboundPackets = 0;
-        this.silencePackets = 0;
-        
-        // Audio buffering
+  constructor(webSocket, services) {
+    this.ws = webSocket;
+    this.services = services;
+    this.callSid = null;
+    this.streamSid = null;
+    this.active = true;
+    this.hangupInitiated = false;
+    this.hasSeenMedia = false;
+    
+    // Counters and audio handling
+    this.receivedPackets = 0;
+    this.inboundPackets = 0;
+    this.silencePackets = 0;
+    this.audioAccumulator = [];
+    this.audioAccumulatorSize = 0;
+    this.bufferSizeThreshold = 2 * 1024; // 2 KB
+    this.flushTimer = null;
+    this.flushInterval = this.services.config.deepgram.throttleInterval;
+    
+    // Initialize STT service
+    this.sttService = new DeepgramSTTService(
+      this.services.config.deepgram,
+      this._handleTranscript.bind(this),
+      this._handleUtteranceEnd.bind(this)
+    );
+    
+    // Setup WebSocket handlers
+    this.ws.on("message", this._handleMessage.bind(this));
+    this.ws.on("close", this._handleClose.bind(this));
+    this.ws.on("error", (error) => log.error("WebSocket error:", error));
+    
+    // Setup stats logging
+    this.statsTimer = setInterval(() => {
+      if (this.receivedPackets > 0) {
+        log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}, silence=${this.silencePackets}`);
+      }
+    }, 10000);
+    
+    log.info("New call session created");
+  }
+  
+  // Audio buffer management
+  stopFlushTimer() {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }    
+  }
+  
+  startFlushTimer() {
+    // Cancel the previous timer, if any        
+    this.stopFlushTimer();
+    
+    if (this.isShuttingDown) {
+      return;
+    }
+            
+    // Schedule the timer
+    this.flushTimer = setTimeout(() => {
+      this.flushAudioBuffer();
+    }, this.flushInterval);
+  }
+  
+  flushAudioBuffer() {
+    this.stopFlushTimer();
+
+    if (this.audioAccumulatorSize > 0) {
+      const combinedBuffer = Buffer.concat(this.audioAccumulator);
+      if (this.sttService?.connected) {
+        log.debug(`Flushing ${this.audioAccumulator.length} buffers, total size: ${combinedBuffer.length} bytes`);
+        this.sttService.send(combinedBuffer);
         this.audioAccumulator = [];
         this.audioAccumulatorSize = 0;
-        this.bufferSizeThreshold = 2 * 1024; // 2 KB
-        this.flushTimer = null;
-        this.finalizeTimer = null;
-        this.flushInterval = this.services.config.deepgram.throttleInterval;
-        this.finalizeInterval = 50; // Max: 50 finalize per second (here we're doing 20/s)
-        
-        // Bind methods
-        this._handleMessage = this._handleMessage.bind(this);
-        this._handleClose = this._handleClose.bind(this);
-        this._handleTranscript = this._handleTranscript.bind(this);
-        this._handleUtteranceEnd = this._handleUtteranceEnd.bind(this);
-        this._handleHangup = this._handleHangup.bind(this);
-        this._cleanup = this._cleanup.bind(this);
-        this.flushAudioBuffer = this.flushAudioBuffer.bind(this);
-        this.accumulateAudio = this.accumulateAudio.bind(this);
-        
-        this.sttService = new DeepgramSTTService(
-                                                 this.services.config.deepgram,
-                                                 this._handleTranscript,
-                                                 this._handleUtteranceEnd
-                                                 );
-        this.deepgram = this.sttService.connect();
-        
-        this.ws.on("message", this._handleMessage);
-        this.ws.on("close", this._handleClose);
-        this.ws.on("error", (error) => {
-            logger.error("WebSocket error:", error);
-        });
-        
-        this.statsTimer = setInterval(() => {
-            if (this.receivedPackets > 0) {
-                logger.info(
-                            `Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}, silence=${this.silencePackets}`
-                            );
+      }
+    }
+    
+    this.startFlushTimer();
+  }
+  
+  accumulateAudio(buffer) {
+    this.audioAccumulator.push(buffer);
+    this.audioAccumulatorSize += buffer.length;
+    
+    if (this.audioAccumulatorSize >= this.bufferSizeThreshold) {
+      this.flushAudioBuffer();
+    } else if (!this.flushTimer) {
+      this.startFlushTimer();
+    }
+  }
+  
+  _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0x68) {
+    try {
+      const binary = Buffer.from(base64Payload, "base64");
+      if (binary.length < 10) return true;
+      
+      let nonSilenceCount = 0;
+      const samples = Math.ceil(binary.length / 8);
+      
+      for (let i = 0; i < binary.length; i += 8) {
+        if (binary[i] < mulawThreshold) nonSilenceCount++;
+      }
+      
+      return nonSilenceCount / samples > threshold;
+    } catch {
+      return true;
+    }
+  }
+  
+  // Message handling
+  _handleMessage(message) {
+    if (!this.active) return;
+    
+    let data;
+    try {
+      // Parse message into JSON
+      if (Buffer.isBuffer(message)) {
+        data = JSON.parse(message.toString("utf8"));
+      } else if (typeof message === "string") {
+        data = JSON.parse(message);
+      } else {
+        return;
+      }
+      
+      // Process by event type
+      switch (data.event) {
+        case "connected":
+          log.info("Twilio: Connected event received");
+          break;
+          
+        case "start":
+          this.callSid = data.start?.callSid || data.callSid;
+          if (this.callSid) {
+            log.info(`Twilio: Call started, SID: ${this.callSid}`);
+          }
+          break;
+          
+        case "media":
+          this.receivedPackets++;
+          
+          // Handle first media packet
+          if (!this.hasSeenMedia) {
+            this.hasSeenMedia = true;
+            log.info("Twilio: First media event received");
+          }
+          
+          // Track stream SID
+          if (!this.streamSid && data.streamSid) {
+            this.streamSid = data.streamSid;
+            log.info(`Twilio: Stream SID: ${this.streamSid}`);
+          }
+          
+          // Process audio payload
+          if (data.media?.payload) {
+            if (data.media.track === "inbound" || data.media.track === "outbound") {
+              this.inboundPackets++;
+              const payload = data.media.payload;
+              
+              // Skip processing if it's silence
+              const STRIP_SILENCE = false;
+              if (!STRIP_SILENCE || this._hasAudioEnergy(payload)) {
+                const rawAudio = Buffer.from(payload, "base64");
+                this.accumulateAudio(rawAudio);
+              } else {
+                this.silencePackets++;
+              }
             }
-        }, 10000);
-        
-        logger.info("New call session created");
+          }
+          break;
+          
+        case "close":
+          log.info("Twilio: Close event received");
+          this._cleanup();
+          break;
+      }
+    } catch (error) {
+      log.error("Error processing message", error);
+    }
+  }
+  
+  // Transcript handling
+  _handleTranscript(transcript, isFinal) {
+    if (!this.active || this.hangupInitiated) return;
+    
+    log.info(isFinal ? `[Final] ${transcript}` : transcript);
+    
+    // Check for commands in transcript
+    if (config.commands.hangup.test(transcript)) {
+      log.info("Hangup command detected in transcript");
+      this._handleHangup("Thank you for calling. Goodbye.");
+    } else if (config.commands.goodbye.test(transcript)) {
+      log.info("Goodbye command detected in transcript");
+      this._handleHangup("We appreciate your call. Have a great day!");
+    }
+  }
+  
+  _handleUtteranceEnd(utterance) {
+    if (this.active) log.info(`Complete utterance: ${utterance}`);
+  }
+  
+  // Call control
+  async _handleHangup(customPhrase) {
+    if (!this.active || !this.callSid || this.hangupInitiated) return;
+    
+    try {
+      this.hangupInitiated = true;
+      log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
+      
+      if (customPhrase) {
+        await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
+      } else {
+        await this.services.twilioService.hangupCall(this.callSid);
+      }
+    } catch (error) {
+      log.error("Failed to hang up call", error);
+      this.hangupInitiated = false;
+    }
+  }
+  
+  _handleClose() {
+    log.info("Twilio: Connection closed");
+    this._cleanup();
+  }
+  
+  _cleanup() {
+    if (!this.active) return;
+    
+    this.active = false;
+    this.hangupInitiated = false;
+    
+    // Clear timers
+    if (this.statsTimer) {
+      clearInterval(this.statsTimer);
+      this.statsTimer = null;
     }
     
-    stopFlushTimer() {
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
-        }    
+    this.stopFlushTimer();
+    
+    // Clean up services
+    if (this.sttService) {
+      this.sttService.cleanup();
+      this.sttService = null;
     }
     
-    startFlushTimer() {
-		// Cancel the previous timer, if any        
-		this.stopFlushTimer();
-        
-        if (this.isShuttingDown) {
-        	return;
+    // Close WebSocket
+    if (this.ws) {
+      try {
+        if (this.ws.readyState === WebSocket.OPEN) {
+          this.ws.terminate();
         }
-            
-        // Schedule the timer
-        this.flushTimer = setTimeout(() => {
-            this.flushAudioBuffer();
-        }, this.flushInterval);
+        this.ws.removeAllListeners();
+      } catch (err) {
+        log.error("Error terminating WebSocket", err);
+      }
+      this.ws = null;
     }
     
-    accumulateAudio(buffer) {
-        // Add buffer and update size
-        this.audioAccumulator.push(buffer);
-        this.audioAccumulatorSize += buffer.length;
-
-        // If accumulated size exceeds threshold, flush immediately
-        if (this.audioAccumulatorSize >= this.bufferSizeThreshold) {
-            this.flushAudioBuffer();
-        }
-    }
-    
-    flushAudioBuffer() {
-    	this.stopFlushTimer();
-
-        if (this.audioAccumulatorSize > 0) {
-            // Combine the accumulated buffers
-            const combinedBuffer = Buffer.concat(this.audioAccumulator);
-            // If Deepgram is connected, send the audio and clear the buffer
-            if (this.sttService && this.sttService.connected) {
-            
-                logger.debug( `Flushing ${this.audioAccumulator.length} buffers, total size: ${combinedBuffer.length} bytes` );
-                
-                this.sttService.send(combinedBuffer);
-                this.audioAccumulator = [];
-                this.audioAccumulatorSize = 0;
-                
-                // Utilize finalize() since we're stripping out quiet
-                // sections with _hasAudioEnergy()
-                
-                // this.sendFinalize();
-            }
-        }
-        
-        this.startFlushTimer();
-    }
-    
-    sendFinalize() {
-        this.sttService.send(
-            JSON.stringify({
-            	type: "Finalize",
-            }));       
-    }
-    
-    _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0x68) {
-        try {
-            const binary = Buffer.from(base64Payload, "base64");
-            if (binary.length < 10) return true;
-            
-            let nonSilenceCount = 0;
-            let samples = 0;
-            
-            // const hexValues = []; // Array to store hex values        
-            
-            for (let i = 0; i < binary.length; i += 8) { // adjust sampling as needed
-                samples++;
-                const byte = binary[i];
-                // hexValues.push(byte.toString(16).padStart(2, "0"));           
-                if (byte < mulawThreshold) nonSilenceCount++;
-            }
-            
-            // Log all sampled hex byte values in one line
-            // logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
-            
-            const ratio = nonSilenceCount / samples;
-            return ratio > threshold;
-        } catch (error) {
-            logger.debug("Error checking audio energy", error);
-            return true;
-        }
-    }
-    
-    _handleMessage(message) {
-        if (!this.active) return;
-        try {
-            let data;
-            let messageText;
-            if (Buffer.isBuffer(message)) {
-                messageText = message.toString("utf8");
-                try {
-                    data = JSON.parse(messageText);
-                    logger.debug("Successfully parsed binary message as JSON");
-                } catch (e) {
-                    logger.debug(`Binary message not valid JSON: ${messageText.substring(0, 100)}...`);
-                    return;
-                }
-            } else if (typeof message === "string") {
-                messageText = message;
-                try {
-                    data = JSON.parse(message);
-                    logger.debug("Successfully parsed string message as JSON");
-                } catch (e) {
-                    logger.debug(`String message not valid JSON: ${message.substring(0, 100)}...`);
-                    return;
-                }
-            } else {
-                logger.warn(`Received message of unknown type: ${typeof message}`);
-                return;
-            }
-            if (!this.hasSeenMedia) {
-                logger.debug(`Complete message: ${messageText}`);
-            }
-            switch (data.event) {
-            case "connected":
-                logger.info("Twilio: Connected event received");
-                break;
-            case "start":
-                if (data.start && data.start.callSid) {
-                    this.callSid = data.start.callSid;
-                } else if (data.callSid) {
-                    this.callSid = data.callSid;
-                } else {
-                    logger.warn("Twilio: Call started but could not find callSid in message", data);
-                }
-                if (this.callSid) {
-                    logger.info(`Twilio: Call started, SID: ${this.callSid}`);
-                }
-                break;
-            case "media":
-                if (!this.hasSeenMedia) {
-                    logger.info("Twilio: First media event received");
-                    this.hasSeenMedia = true;
-                    if (data.media) {
-                        logger.info(
-                                    `Media packet info: track=${data.media.track}, chunk=${data.media.chunk}, timestamp=${data.media.timestamp}`
-                                    );
-                    }
-                }
-                this.receivedPackets++;
-                if (!this.streamSid && data.streamSid) {
-                    this.streamSid = data.streamSid;
-                    logger.info(`Twilio: Stream SID: ${this.streamSid}`);
-                }
-                if (data.media && data.media.payload) {
-                    if (data.media.track === "inbound" || data.media.track === "outbound") {
-                        this.inboundPackets++;
-                        try {
-                            const payload = data.media.payload;
-                            if (!STRIP_SILENCE || this._hasAudioEnergy(payload)) {
-                                const rawAudio = audioBufferPool.decodeBase64(payload);
-                                if (!rawAudio) {
-                                    logger.warn("Failed to decode audio payload");
-                                    return;
-                                }
-                                this.accumulateAudio(rawAudio);
-                            } else {
-                                this.silencePackets++;
-                            }
-                        } catch (error) {
-                            logger.error("Error processing audio payload", error);
-                        }
-                    }
-                } else {
-                    logger.debug("Received media event without payload");
-                }
-                break;
-            case "mark":
-                logger.debug("Twilio: Mark event received", data);
-                break;
-            case "close":
-                logger.info("Twilio: Close event received", data);
-                this._cleanup();
-                break;
-            default:
-                logger.debug(`Twilio: Unknown event type: ${data.event}`);
-            }
-        } catch (error) {
-            logger.error("Error processing message", error);
-            if (message) {
-                const sample = Buffer.isBuffer(message)
-                ? `Binary message of length ${message.length}`
-                : `Message: ${typeof message === "string" ? message.substring(0, 100) : typeof message}`;
-                logger.error(`Message sample: ${sample}`);
-            }
-        }
-    }
-    
-    _handleTranscript(transcript, isFinal) {
-        if (!this.active || this.hangupInitiated) return;
-        try {
-            if (isFinal) {
-                logger.info(`[Final] ${transcript}`);
-            } else {
-                logger.info(`${transcript}`);
-            }
-            if (
-                this.services.textUtils.searchWordInSentence(transcript, "hangup") ||
-                this.services.textUtils.searchWordInSentence(transcript, "hang up")
-                ) {
-                    logger.info("Hangup command detected in transcript");
-                    this._handleHangup("Thank you for calling. Goodbye.");
-                } else if (this.services.textUtils.searchWordInSentence(transcript, "goodbye")) {
-                    logger.info("Goodbye command detected in transcript");
-                    this._handleHangup("We appreciate your call. Have a great day!");
-                }
-        } catch (error) {
-            logger.error("Error handling transcript", error);
-        }
-    }
-    
-    _handleUtteranceEnd(utterance) {
-        if (!this.active) return;
-        try {
-            logger.info(`Complete utterance: ${utterance}`);
-        } catch (error) {
-            logger.error("Error handling utterance end", error);
-        }
-    }
-    
-    async _handleHangup(customPhrase) {
-        if (!this.active || !this.callSid || this.hangupInitiated) return;
-        try {
-            this.hangupInitiated = true;
-            logger.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
-            if (customPhrase) {
-                await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
-            } else {
-                await this.services.twilioService.hangupCall(this.callSid);
-            }
-        } catch (error) {
-            logger.error("Failed to hang up call", error);
-            this.hangupInitiated = false;
-        }
-    }
-    
-    _handleClose() {
-        logger.info("Twilio: Connection closed");
-        this._cleanup();
-    }
-    
-    _cleanup() {
-        if (!this.active) return;
-        try {
-            this.active = false;
-            this.hangupInitiated = false;
-            if (this.statsTimer) {
-                clearInterval(this.statsTimer);
-                this.statsTimer = null;
-            }
-            if (this.sttService) {
-                this.sttService.cleanup();
-                this.sttService = null;
-            }
-            if (this.ws) {
-                try {
-                    if (this.ws.readyState === WebSocket.OPEN) {
-                        this.ws.terminate();
-                    }
-                    this.ws.removeAllListeners();
-                } catch (err) {
-                    logger.error("Error terminating WebSocket", err);
-                }
-                this.ws = null;
-            }
-            logger.info(`Call session cleaned up, Call SID: ${this.callSid || "unknown"}, processed ${this.receivedPackets} packets`);
-        } catch (error) {
-            logger.error("Error during session cleanup", error);
-        }
-    }
+    log.info(`Call session cleaned up, Call SID: ${this.callSid || "unknown"}, processed ${this.receivedPackets} packets`);
+  }
 }
 
+// VoiceServer
 class VoiceServer {
-    constructor() {
-        this.config = config.init();
-        this.services = {
-            config: this.config,
-            twilioService: new TwilioService(this.config.twilio),
-            textUtils: new TextUtils(this.config.punctuation)
-        };
-        this.httpServer = http.createServer(this._handleHttpRequest.bind(this));
-        const wsOptions = {
-            server: this.httpServer,
-            perMessageDeflate: false,
-            maxPayload: 65536,
-            handleProtocols: () => true
-        };
-        this.wsServer = new WebSocket.Server(wsOptions);
-        this._setupWebSocketHandlers();
-        this.sessions = new Map();
-        this.isShuttingDown = false;
-    }
+  constructor() {
+    this.services = {
+      config,
+      twilioService: new TwilioService(config.twilio)
+    };
     
-    _handleHttpRequest(req, res) {
-        const { pathname } = url.parse(req.url);
-        if (pathname === "/") {
-            res.writeHead(200, { "Content-Type": "text/plain" });
-            res.end("aiShield Monitor");
-        } else {
-            res.writeHead(404, { "Content-Type": "text/plain" });
-            res.end("Not Found");
-        }
-    }
+    this.httpServer = http.createServer((req, res) => {
+      if (url.parse(req.url).pathname === "/") {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("aiShield Monitor");
+      } else {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not Found");
+      }
+    });
     
-    _setupWebSocketHandlers() {
-        this.wsServer.on("connection", (ws, req) => {
-            logger.info("New WebSocket connection established");
-            logger.info(`WebSocket connection headers: ${JSON.stringify(req.headers["sec-websocket-protocol"] || "none")}`);
-            ws._socket.on("data", (data) => {
-                logger.debug(`Raw WebSocket data received: ${data.length} bytes`);
-            });
-            const session = new CallSession(ws, this.services);
-            const remoteAddress = req.socket.remoteAddress;
-            const remotePort = req.socket.remotePort;
-            const sessionId = `${remoteAddress}:${remotePort}`;
-            this.sessions.set(sessionId, session);
-            ws.on("close", (code, reason) => {
-                logger.info(`WebSocket closed with code ${code}, reason: ${reason || "none"}`);
-                this.sessions.delete(sessionId);
-                logger.info(`Session ${sessionId} removed`);
-            });
-        });
-    }
+    this.wsServer = new WebSocket.Server({ server: this.httpServer });
+    this.sessions = new Map();
+    this.isShuttingDown = false;
     
-    start() {
-        try {
-            this.httpServer.listen(this.config.server.port, () => {
-                logger.info(`Server listening on port ${this.config.server.port}`);
-            });
-        } catch (error) {
-            logger.error("Failed to start server", error);
-            process.exit(1);
-        }
-    }
+    this.wsServer.on("connection", (ws, req) => {
+      const sessionId = `${req.socket.remoteAddress}:${req.socket.remotePort}`;
+      log.info(`New WebSocket connection established from ${sessionId}`);
+      
+      const session = new CallSession(ws, this.services);
+      this.sessions.set(sessionId, session);
+      
+      ws.on("close", () => {
+        this.sessions.delete(sessionId);
+        log.info(`Session ${sessionId} removed`);
+      });
+    });
+  }
+  
+  start() {
+    this.httpServer.listen(config.server.port, () => {
+      log.info(`Server listening on port ${config.server.port}`);
+    });
+  }
+  
+  stop() {
+    this.isShuttingDown = true;
     
-    stop() {
-        try {
-            this.isShuttingDown = true;
-            for (const session of this.sessions.values()) {
-                session._cleanup();
-            }
-            this.sessions.clear();
-            audioBufferPool.clear();
-            const closeTimeout = setTimeout(() => {
-                logger.warn("WebSocket server close timed out, forcing exit");
-                this.httpServer.close();
-            }, 5000);
-            this.wsServer.close(() => {
-                clearTimeout(closeTimeout);
-                logger.info("WebSocket server closed");
-                this.httpServer.close(() => {
-                    logger.info("HTTP server closed");
-                });
-            });
-        } catch (error) {
-            logger.error("Error stopping server", error);
-        }
+    // Cleanup all sessions
+    for (const session of this.sessions.values()) {
+      session._cleanup();
     }
+    this.sessions.clear();
+    
+    // Close servers with timeout
+    const closeTimeout = setTimeout(() => {
+      log.warn("Server shutdown timed out, forcing exit");
+      this.httpServer.close();
+    }, 5000);
+    
+    this.wsServer.close(() => {
+      clearTimeout(closeTimeout);
+      log.info("WebSocket server closed");
+      this.httpServer.close(() => {
+        log.info("HTTP server closed");
+      });
+    });
+  }
 }
 
 // Process termination handling
-process.on("SIGINT", () => {
-    logger.info("Received SIGINT signal, shutting down gracefully");
-    if (server) {
-        server.stop();
-    }
-    setTimeout(() => {
-        logger.info("Forcing exit after timeout");
-        process.exit(0);
-    }, 5000);
-});
-process.on("SIGTERM", () => {
-    logger.info("Received SIGTERM signal, shutting down gracefully");
-    if (server) {
-        server.stop();
-    }
-    setTimeout(() => {
-        logger.info("Forcing exit after timeout");
-        process.exit(0);
-    }, 5000);
-});
+const gracefulShutdown = (signal) => {
+  log.info(`Received ${signal} signal, shutting down gracefully`);
+  if (server) server.stop();
+  setTimeout(() => process.exit(0), 5000);
+};
+
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("uncaughtException", (error) => {
-    logger.error("Uncaught exception", error);
-    if (server) {
-        server.stop();
-    }
-    process.exit(1);
+  log.error("Uncaught exception", error);
+  if (server) server.stop();
+  process.exit(1);
 });
 
+// Start the server
 const server = new VoiceServer();
 server.start();
