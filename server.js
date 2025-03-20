@@ -1,4 +1,246 @@
-// Modified CallSession class with performance optimizations
+// Import required modules
+const http = require("http");
+const WebSocket = require("ws");
+const url = require("url");
+const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
+require("dotenv").config();
+
+// Simplified logger
+const log = {
+  info: (msg, data) => console.log(`${msg}`, data || ""),
+  error: (msg, err) => console.error(`[ERROR] ${msg}`, err || ""),
+  warn: (msg, data) => console.warn(`[WARN] ${msg}`, data || ""),
+  debug: (msg, data) => process.env.DEBUG && console.log(`[DEBUG] ${msg}`, data || "")
+};
+
+// Configuration
+const config = (() => {
+  // Check required environment variables
+  ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "DEEPGRAM_API_KEY"].forEach(varName => {
+    if (!process.env[varName]) throw new Error(`Missing required environment variable: ${varName}`);
+  });
+  
+  return {
+    server: {
+      port: parseInt(process.env.HTTP_SERVER_PORT) || 8080
+    },
+    twilio: {
+      accountSid: process.env.TWILIO_ACCOUNT_SID,
+      authToken: process.env.TWILIO_AUTH_TOKEN,
+      studioFlowId: process.env.TWILIO_STUDIO_FLOW_ID || "FWe2a7c39cffcbe604f2f158b68aae3b19"
+    },
+    deepgram: {
+      apiKey: process.env.DEEPGRAM_API_KEY,
+      ttsWebsocketURL: process.env.DEEPGRAM_TTS_WS_URL || 
+        "wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none",
+      sttConfig: {
+        model: process.env.DEEPGRAM_MODEL || "nova-3", // "nova-2-phonecall",
+        language: process.env.DEEPGRAM_LANGUAGE || "en",
+        encoding: "mulaw",
+        sample_rate: 8000,
+        channels: 1,
+        no_delay: true,
+        interim_results: true,
+        endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 5,
+        utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
+      },
+      throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 20
+    },
+    commands: {
+      hangup: /\b(hangup|hang up)\b/i,
+      goodbye: /\b(goodbye|good bye)\b/i
+    }
+  };
+})();
+
+// TwilioService
+class TwilioService {
+  constructor(config) {
+    this.config = config;
+    this.client = require("twilio")(config.accountSid, config.authToken);
+    this.VoiceResponse = require("twilio").twiml.VoiceResponse;
+  }
+  
+  async hangupCall(callSid) {
+    try {
+      log.info(`Initiating hangup for call: ${callSid}`);
+      const execution = await this.client.studio.v2
+        .flows(this.config.studioFlowId)
+        .executions(callSid);
+      log.info("Call hangup executed", { executionSid: execution.sid });
+      return execution;
+    } catch (error) {
+      log.error("Failed to hangup call", error);
+      throw error;
+    }
+  }
+  
+  async sayPhraseAndHangup(callSid, phrase) {
+    if (!callSid) throw new Error("Call SID is required");
+    
+    try {
+      log.info(`Saying phrase and hanging up call ${callSid}: "${phrase}"`);
+      const twiml = new this.VoiceResponse();
+      twiml.say({ voice: "Polly.Amy-Neural", language: "en-US" }, phrase);
+      twiml.hangup();
+      
+      const result = await this.client.calls(callSid).update({ twiml: twiml.toString() });
+      log.info(`Call ${callSid} successfully updated with TwiML`);
+      return result;
+    } catch (error) {
+      log.error(`Failed to update call ${callSid} with TwiML`, error);
+      throw error;
+    }
+  }
+}
+
+// DeepgramSTTService
+class DeepgramSTTService {
+  constructor(config, onTranscript, onUtteranceEnd) {
+    this.config = config;
+    this.onTranscript = onTranscript;
+    this.onUtteranceEnd = onUtteranceEnd;
+    this.client = createClient(config.apiKey);
+    this.deepgram = null;
+    this.isFinals = [];
+    this.connected = false;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 1000;
+    this.isShuttingDown = false;
+    this.keepAliveInterval = null;
+    
+    this.connect();
+  }
+  
+  connect() {
+    if (this.isShuttingDown) return;
+    
+    try {
+      log.info(this.reconnectAttempts > 0 
+        ? `Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`
+        : "Connecting to Deepgram...");
+      
+      this.deepgram = this.client.listen.live(this.config.sttConfig);
+      
+      if (this.keepAliveInterval) clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = setInterval(() => {
+        if (this.deepgram && this.connected) this.deepgram.keepAlive();
+      }, 10000);
+      
+      this._setupEventListeners();
+      return this.deepgram;
+    } catch (error) {
+      log.error("Failed to connect to Deepgram STT", error);
+      this._handleConnectionFailure();
+      return null;
+    }
+  }
+  
+  _handleConnectionFailure() {
+    this.connected = false;
+    
+    if (this.isShuttingDown) return; // Don't try to reconnect if we shut down
+        
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+      log.info(`Will attempt to reconnect in ${delay}ms...`);
+      setTimeout(() => this.connect(), delay);
+    } else {
+      log.error(`Failed to reconnect after ${this.maxReconnectAttempts} attempts`);
+      this.reconnectAttempts = 0;
+    }
+  }
+  
+  _setupEventListeners() {
+    // Open event
+    this.deepgram.addListener(LiveTranscriptionEvents.Open, () => {
+      log.info("Deepgram STT connection opened");
+      this.connected = true;
+      this.reconnectAttempts = 0;
+      
+      // Transcript event
+      this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        if (!transcript) return;
+        
+        if (!data.is_final) {
+          this.onTranscript?.(transcript, false);
+          return;
+        }
+        
+        this.isFinals.push(transcript);
+        if (data.speech_final) {
+          this.onTranscript?.(this.isFinals.join(" "), true);
+          this.isFinals = [];
+        } else {
+          this.onTranscript?.(transcript, true);
+        }
+      });
+      
+      // Utterance end event
+      this.deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, () => {
+        if (this.isFinals.length > 0) {
+          this.onUtteranceEnd?.(this.isFinals.join(" "));
+          this.isFinals = [];
+        }
+      });
+    });
+    
+    // Error and close events
+    this.deepgram.addListener(LiveTranscriptionEvents.Close, () => {
+      log.info("Deepgram STT connection closed");
+      this.connected = false;
+      this._handleConnectionFailure();
+    });
+    
+    this.deepgram.addListener(LiveTranscriptionEvents.Error, (error) => {
+      log.error("Deepgram STT error", error);
+      if (!this.connected) this._handleConnectionFailure();
+    });
+    
+    this.deepgram.addListener(LiveTranscriptionEvents.Warning, (warning) => {
+      log.warn("Deepgram STT warning", warning);
+    });
+  }
+  
+  send(audioData) {
+    if (!this.connected || !this.deepgram || !audioData || !Buffer.isBuffer(audioData) || audioData.length === 0) return;
+    
+    try {
+      this.deepgram.send(audioData);
+    } catch (error) {
+      log.error("Failed to send audio to Deepgram", error);
+      if (error.message?.includes("not open")) {
+        this.connected = false;
+        this._handleConnectionFailure();
+      }
+    }
+  }
+  
+  cleanup() {
+    this.isShuttingDown = true;
+    
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+    }
+    
+    if (this.deepgram) {
+      try {
+        this.deepgram.requestClose();
+      } catch (error) {
+        log.error("Error while closing Deepgram connection", error);
+      }
+      this.deepgram = null;
+    }
+    
+    this.connected = false;
+  }
+}
+
+// CallSession - Optimized version
 class CallSession {
   constructor(webSocket, services) {
     this.ws = webSocket;
@@ -373,12 +615,12 @@ class CallSession {
     this.stopFlushTimer('outbound');
     
     // Clean up services for both tracks
-    if (this.sttService.inbound) {
+    if (this.sttService && this.sttService.inbound) {
       this.sttService.inbound.cleanup();
       this.sttService.inbound = null;
     }
     
-    if (this.sttService.outbound) {
+    if (this.sttService && this.sttService.outbound) {
       this.sttService.outbound.cleanup();
       this.sttService.outbound = null;
     }
@@ -399,3 +641,89 @@ class CallSession {
     log.info(`Call session cleaned up, Call SID: ${this.callSid || "unknown"}, processed ${this.receivedPackets} packets`);
   }
 }
+
+// VoiceServer
+class VoiceServer {
+  constructor() {
+    this.services = {
+      config,
+      twilioService: new TwilioService(config.twilio)
+    };
+    
+    this.httpServer = http.createServer((req, res) => {
+      if (url.parse(req.url).pathname === "/") {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("aiShield Monitor");
+      } else {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not Found");
+      }
+    });
+    
+    this.wsServer = new WebSocket.Server({ server: this.httpServer });
+    this.sessions = new Map();
+    this.isShuttingDown = false;
+    
+    this.wsServer.on("connection", (ws, req) => {
+      const sessionId = `${req.socket.remoteAddress}:${req.socket.remotePort}`;
+      log.info(`New WebSocket connection established from ${sessionId}`);
+      
+      const session = new CallSession(ws, this.services);
+      this.sessions.set(sessionId, session);
+      
+      ws.on("close", () => {
+        this.sessions.delete(sessionId);
+        log.info(`Session ${sessionId} removed`);
+      });
+    });
+  }
+  
+  start() {
+    this.httpServer.listen(config.server.port, () => {
+      log.info(`Server listening on port ${config.server.port}`);
+    });
+  }
+  
+  stop() {
+    this.isShuttingDown = true;
+    
+    // Cleanup all sessions
+    for (const session of this.sessions.values()) {
+      session._cleanup();
+    }
+    this.sessions.clear();
+    
+    // Close servers with timeout
+    const closeTimeout = setTimeout(() => {
+      log.warn("Server shutdown timed out, forcing exit");
+      this.httpServer.close();
+    }, 5000);
+    
+    this.wsServer.close(() => {
+      clearTimeout(closeTimeout);
+      log.info("WebSocket server closed");
+      this.httpServer.close(() => {
+        log.info("HTTP server closed");
+      });
+    });
+  }
+}
+
+// Process termination handling
+const gracefulShutdown = (signal) => {
+  log.info(`Received ${signal} signal, shutting down gracefully`);
+  if (server) server.stop();
+  setTimeout(() => process.exit(0), 5000);
+};
+
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("uncaughtException", (error) => {
+  log.error("Uncaught exception", error);
+  if (server) server.stop();
+  process.exit(1);
+});
+
+// Start the server
+const server = new VoiceServer();
+server.start();
