@@ -13,6 +13,123 @@ const log = {
   debug: (msg, data) => process.env.DEBUG && console.log(`[DEBUG] ${msg}`, data || "")
 };
 
+/**
+ * Creates a detector for specified phrases in transcriptions.
+ * 
+ * @param {string} phraseList - A newline-separated list of phrases to detect, with words separated by dashes
+ * @returns {Function} - A function that can be called with new transcriptions to detect phrases
+ */
+function createScamPhraseDetector(phraseList) {
+  // Process the phrase list - convert dashes to spaces
+  const phrases = phraseList.split('\n')
+    .map(phrase => phrase.trim().replace(/-/g, ' ').toLowerCase())
+    .filter(phrase => phrase.length > 0);
+  
+  // Map each phrase to its word array for faster comparison
+  const phraseWordArrays = phrases.map(phrase => ({
+    original: phrase,  // Keep original for reporting
+    words: phrase.split(/\s+/)
+  }));
+  
+  // Find the longest phrase (in words) to determine window size
+  const maxPhraseWords = Math.max(...phraseWordArrays.map(p => p.words.length));
+  
+  // Keep track of words from transcriptions for each track
+  const trackHistory = {};
+  
+  // Keep track of already detected phrases with timestamps
+  const detectedPhrases = new Map();
+  
+  // Time window for re-detection (in milliseconds) - 5 minutes
+  const REDETECTION_WINDOW = 5 * 60 * 1000;
+  
+  /**
+   * Detects phrases in a new transcription
+   * 
+   * @param {string} newTranscription - The new transcription text
+   * @param {string} track - The track identifier (e.g., "inbound" or "outbound")
+   * @param {boolean} isFinal - Whether this is a final transcription (defaults to false)
+   * @returns {Array|null} - Array of matched phrases or null if no matches
+   */
+  return function detectScamPhrases(newTranscription, track, isFinal = false) {
+    if (!newTranscription || !track) return null;
+    
+    const now = Date.now();
+    
+    // Clean up old detected phrases
+    for (const [key, timestamp] of detectedPhrases.entries()) {
+      if (now - timestamp > REDETECTION_WINDOW) {
+        detectedPhrases.delete(key);
+      }
+    }
+    
+    // Ensure we have a history for this track
+    if (!trackHistory[track]) {
+      trackHistory[track] = [];
+    }
+    
+    // Process new transcription
+    const processedText = newTranscription.toLowerCase().replace(/[^\w\s]/g, '');
+    const newWords = processedText.split(/\s+/).filter(w => w.length > 0);
+    
+    // Add to our word history for this track
+    trackHistory[track] = trackHistory[track].concat(newWords);
+    
+    // Keep history limited to a reasonable size
+    const historyLimit = maxPhraseWords * 3;
+    if (trackHistory[track].length > historyLimit) {
+      trackHistory[track] = trackHistory[track].slice(-historyLimit);
+    }
+    
+    // Get the current words for this track
+    const words = trackHistory[track];
+    
+    // Check for matches
+    const matches = [];
+    
+    for (const { original, words: phraseWords } of phraseWordArrays) {
+      // Skip if we don't have enough words
+      if (words.length < phraseWords.length) continue;
+      
+      // Skip if we've recently detected this phrase
+      const phraseKey = `${track}:${original}`;
+      if (detectedPhrases.has(phraseKey)) continue;
+      
+      // Check each possible starting position in our word history
+      for (let i = 0; i <= words.length - phraseWords.length; i++) {
+        let matchFound = true;
+        
+        // Check if the phrase matches starting at this position
+        for (let j = 0; j < phraseWords.length; j++) {
+          if (words[i + j] !== phraseWords[j]) {
+            matchFound = false;
+            break;
+          }
+        }
+        
+        if (matchFound) {
+          // Add to matches (with original phrase spelling)
+          matches.push(original);
+          
+          // Mark as detected with current timestamp
+          detectedPhrases.set(phraseKey, now);
+          
+          // No need to check further for this phrase
+          break;
+        }
+      }
+    }
+    
+    // Handle final transcriptions specially
+    if (isFinal) {
+      // For final transcriptions, keep fewer words in history
+      trackHistory[track] = words.slice(-maxPhraseWords);
+    }
+    
+    return matches.length > 0 ? matches : null;
+  };
+}
+
 // Configuration
 const config = (() => {
   // Check required environment variables
@@ -49,7 +166,74 @@ const config = (() => {
     commands: {
       hangup: /\b(hangup|hang up)\b/i,
       goodbye: /\b(goodbye|good bye)\b/i
-    }
+    },
+    // List of scam phrases to detect
+    scamPhrases: `I-love-you
+soulmate
+meant-to-be
+help-me
+money-for-a-ticket
+urgent-need
+wedding-plans
+trust-me
+send-me-gift-cards
+I-need-your-help
+guaranteed-return
+risk-free
+act-fast
+limited-time-opportunity
+secure-your-future
+no-risk
+double-your-money
+get-rich-quick
+investment-portfolio
+exclusive-deal
+debt-forgiveness
+consolidate-your-loans
+low-interest-rate
+act-now-to-reduce-debt
+past-due-payment
+insurance-claim-overdue
+urgent-action-required
+policy-cancellation
+pay-to-reactivate
+it's-me,-your-grandson
+help-me-out-of-trouble
+I-need-bail-money
+don't-tell-mom
+urgent-family-emergency
+send-money-immediately
+wire-transfer-needed
+I'm-in-danger
+please-trust-me
+you've-won
+claim-your-prize
+pay-a-fee-to-collect
+cash-transfer-required
+congratulations,-you're-the-winner
+lottery-winnings
+exclusive-prize-claim
+act-fast-to-secure-your-prize
+winner-notification
+your-computer-is-at-risk
+remote-access-required
+fix-your-account
+service-renewal
+subscription-fee
+update-your-device
+account-locked
+technical-problem-detected
+call-this-number-immediately
+tax-debt
+unpaid-taxes
+IRS-agent
+legal-action-required
+arrest-warrant-issued
+pay-now-to-avoid-penalties
+urgent-tax-resolution
+back-taxes-owed
+settlement-fee
+tax-relief-services`
   };
 })();
 
@@ -240,7 +424,7 @@ class DeepgramSTTService {
   }
 }
 
-// CallSession - Optimized version with Deepgram data tracking
+// CallSession - Optimized version with Deepgram data tracking and scam detection
 class CallSession {
   constructor(webSocket, services) {
     this.ws = webSocket;
@@ -250,6 +434,10 @@ class CallSession {
     this.active = true;
     this.hangupInitiated = false;
     this.hasSeenMedia = false;
+    
+    // Initialize scam phrase detector
+    this.scamPhraseDetector = createScamPhraseDetector(this.services.config.scamPhrases);
+    this.detectedScamPhrases = [];
     
     // Counters and audio handling
     this.receivedPackets = 0;
@@ -329,6 +517,11 @@ class CallSession {
         // Log Deepgram stats
         this.logDeepgramStats();
         
+        // Log any detected scam phrases
+        if (this.detectedScamPhrases.length > 0) {
+          log.warn(`⚠️ ALERT: Detected scam phrases in this call: ${this.detectedScamPhrases.join(', ')}`);
+        }
+        
         // Reset metrics for next interval
         this.metrics.processingTimes = { inbound: [], outbound: [] };
         this.metrics.bufferGrowth = { inbound: [], outbound: [] };
@@ -336,7 +529,7 @@ class CallSession {
       }
     }, 10000);
     
-    log.info("New call session created with optimized processing and data tracking");
+    log.info("New call session created with optimized processing, data tracking, and scam detection");
   }
   
   // Helper for calculating averages
@@ -611,13 +804,34 @@ class CallSession {
     }
   }
   
-  // Transcript handling - now includes track information
+  // Transcript handling with scam detection
   _handleTranscript(transcript, isFinal, track) {
     if (!this.active || this.hangupInitiated) return;
     
     log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
     
-    // Only process commands from the inbound track
+    // Check for scam phrases
+    const detectedPhrases = this.scamPhraseDetector(transcript, track, isFinal);
+    if (detectedPhrases) {
+      for (const phrase of detectedPhrases) {
+        if (!this.detectedScamPhrases.includes(phrase)) {
+          this.detectedScamPhrases.push(phrase);
+        }
+      }
+      
+      log.warn(`⚠️ SCAM ALERT: Detected phrases in ${track} track: ${detectedPhrases.join(', ')}`);
+      
+      // Optional: Add custom alert logic here
+      // For example, you could implement immediate notification to a supervisor
+      // or flag the call in a monitoring system
+      
+      // Example: If you want to automatically hang up on detected scams in inbound track
+      // if (track === 'inbound' && process.env.AUTO_HANGUP_ON_SCAM === 'true') {
+      //   this._handleHangup("We've detected suspicious activity. This call is being terminated.");
+      // }
+    }
+    
+    // Process commands (only from inbound track)
     if (track === 'inbound' && isFinal) {
       // Check for commands in transcript
       if (config.commands.hangup.test(transcript)) {
@@ -660,6 +874,11 @@ class CallSession {
   
   _cleanup() {
     if (!this.active) return;
+    
+    // Log final stats including scam phrases
+    if (this.detectedScamPhrases.length > 0) {
+      log.warn(`⚠️ CALL ENDED WITH SCAM PHRASES DETECTED: ${this.detectedScamPhrases.join(', ')}`);
+    }
     
     // Log final Deepgram stats before cleanup
     if (this.metrics.deepgram.packetsSent.inbound > 0 || this.metrics.deepgram.packetsSent.outbound > 0) {
