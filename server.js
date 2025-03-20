@@ -240,7 +240,7 @@ class DeepgramSTTService {
   }
 }
 
-// CallSession - Optimized version
+// CallSession - Optimized version with Deepgram data tracking
 class CallSession {
   constructor(webSocket, services) {
     this.ws = webSocket;
@@ -275,12 +275,20 @@ class CallSession {
     this.consecutiveErrors = { inbound: 0, outbound: 0 };
     this.MAX_CONSECUTIVE_ERRORS = 5;
     
-    // 5. PERFORMANCE MONITORING
+    // 5. PERFORMANCE MONITORING - Enhanced with Deepgram data tracking
     this.metrics = {
       processingTimes: { inbound: [], outbound: [] },
       bufferGrowth: { inbound: [], outbound: [] },
       lastMetricTime: Date.now(),
-      delays: { inbound: 0, outbound: 0 }
+      delays: { inbound: 0, outbound: 0 },
+      // Add Deepgram data tracking
+      deepgram: {
+        bytesSent: { inbound: 0, outbound: 0 },
+        packetsSent: { inbound: 0, outbound: 0 },
+        sendRates: { inbound: [], outbound: [] },
+        lastSendTime: { inbound: Date.now(), outbound: Date.now() },
+        responseTimes: { inbound: [], outbound: [] }
+      }
     };
     
     // Initialize STT services - one for each track
@@ -318,6 +326,9 @@ class CallSession {
           Outbound: buffer=${this.audioAccumulatorSize.outbound} bytes, avgProcessing=${avgProcessingTimeOutbound.toFixed(2)}ms, delay=${this.metrics.delays.outbound.toFixed(2)}ms`
         );
         
+        // Log Deepgram stats
+        this.logDeepgramStats();
+        
         // Reset metrics for next interval
         this.metrics.processingTimes = { inbound: [], outbound: [] };
         this.metrics.bufferGrowth = { inbound: [], outbound: [] };
@@ -325,12 +336,41 @@ class CallSession {
       }
     }, 10000);
     
-    log.info("New call session created with optimized processing");
+    log.info("New call session created with optimized processing and data tracking");
   }
   
   // Helper for calculating averages
   _calculateAverage(array) {
     return array.length > 0 ? array.reduce((a, b) => a + b, 0) / array.length : 0;
+  }
+  
+  // Helper for formatting bytes
+  _formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(2)} KB`;
+    return `${(bytes / 1048576).toFixed(2)} MB`;
+  }
+  
+  // New method to log detailed Deepgram stats
+  logDeepgramStats() {
+    // Calculate average send rates
+    const calcAvgRate = (rates) => rates.length > 0 
+      ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length 
+      : 0;
+    
+    const inboundAvgRate = calcAvgRate(this.metrics.deepgram.sendRates.inbound);
+    const outboundAvgRate = calcAvgRate(this.metrics.deepgram.sendRates.outbound);
+    
+    // Log comprehensive Deepgram stats
+    log.info(`Deepgram data transfer stats:
+      Inbound: ${this._formatBytes(this.metrics.deepgram.bytesSent.inbound)} total (${this.metrics.deepgram.packetsSent.inbound} packets, avg ${inboundAvgRate.toFixed(2)} B/s)
+      Outbound: ${this._formatBytes(this.metrics.deepgram.bytesSent.outbound)} total (${this.metrics.deepgram.packetsSent.outbound} packets, avg ${outboundAvgRate.toFixed(2)} B/s)
+      Current rate (inbound): ${this._formatBytes(inboundAvgRate)} per second
+      Current rate (outbound): ${this._formatBytes(outboundAvgRate)} per second
+    `);
+    
+    // Reset rate tracking (but keep totals)
+    this.metrics.deepgram.sendRates = { inbound: [], outbound: [] };
   }
   
   // 3. IMPROVED TIMER LOGIC - Track-specific flush timer management
@@ -377,11 +417,29 @@ class CallSession {
       this.processingStartTime[track] = Date.now();
       
       const combinedBuffer = Buffer.concat(this.audioAccumulator[track]);
+      const bufferSize = combinedBuffer.length;
       
       try {
         if (this.sttService[track]?.connected) {
-          log.debug(`Flushing ${track} track: ${this.audioAccumulator[track].length} buffers, size: ${combinedBuffer.length} bytes`);
+          log.debug(`Flushing ${track} track: ${this.audioAccumulator[track].length} buffers, size: ${bufferSize} bytes`);
+          
+          // Track bytes before sending
+          const now = Date.now();
+          const timeSinceLastSend = now - this.metrics.deepgram.lastSendTime[track];
+          
+          // Send data to Deepgram
           this.sttService[track].send(combinedBuffer);
+          
+          // Update Deepgram metrics
+          this.metrics.deepgram.bytesSent[track] += bufferSize;
+          this.metrics.deepgram.packetsSent[track]++;
+          
+          // Calculate send rate in bytes per second
+          if (timeSinceLastSend > 0) {
+            const sendRate = bufferSize / (timeSinceLastSend / 1000);
+            this.metrics.deepgram.sendRates[track].push(sendRate);
+          }
+          this.metrics.deepgram.lastSendTime[track] = now;
           
           // 4. ERROR RESILIENCE - Reset error counter on success
           this.consecutiveErrors[track] = 0;
@@ -401,6 +459,9 @@ class CallSession {
         const processingTime = Date.now() - this.processingStartTime[track];
         this.lastProcessingTime[track] = processingTime;
         this.metrics.processingTimes[track].push(processingTime);
+        
+        // Track Deepgram response time
+        this.metrics.deepgram.responseTimes[track].push(processingTime);
       }
       
       // 4. ERROR RESILIENCE - Implement circuit breaker
@@ -599,6 +660,12 @@ class CallSession {
   
   _cleanup() {
     if (!this.active) return;
+    
+    // Log final Deepgram stats before cleanup
+    if (this.metrics.deepgram.packetsSent.inbound > 0 || this.metrics.deepgram.packetsSent.outbound > 0) {
+      log.info(`Final Deepgram stats for call ${this.callSid || 'unknown'}:`);
+      this.logDeepgramStats();
+    }
     
     this.active = false;
     this.hangupInitiated = false;
