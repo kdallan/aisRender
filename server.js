@@ -34,17 +34,17 @@ const config = (() => {
       ttsWebsocketURL: process.env.DEEPGRAM_TTS_WS_URL || 
         "wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none",
       sttConfig: {
-        model: process.env.DEEPGRAM_MODEL || "nova-2-phonecall",
+        model: process.env.DEEPGRAM_MODEL || "nova-3", // "nova-2-phonecall",
         language: process.env.DEEPGRAM_LANGUAGE || "en",
         encoding: "mulaw",
         sample_rate: 8000,
         channels: 1,
         no_delay: true,
         interim_results: true,
-        endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 10,
+        endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 8,
         utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
       },
-      throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 30
+      throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 25
     },
     commands: {
       hangup: /\b(hangup|hang up)\b/i,
