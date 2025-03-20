@@ -5,6 +5,7 @@ const path = require("path");
 const WebSocket = require("ws");
 const url = require("url");
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
+const STRIP_SILENCE = false;
 
 // Audio buffer utility for decoding base64
 const audioBufferPool = {
@@ -75,17 +76,17 @@ const config = {
                 sttConfig: {
                     model: process.env.DEEPGRAM_MODEL || "nova-2-phonecall",
                     language: process.env.DEEPGRAM_LANGUAGE || "en",
-                    smart_format: true,
+                    smart_format: false,
                     encoding: "mulaw",
                     sample_rate: 8000,
                     channels: 1,
                     multichannel: false,
                     no_delay: true,
                     interim_results: true,
-                    endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 300,
+                    endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 10,
                     utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
                 },
-                throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 55
+                throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 30
             },
             punctuation: {
                 chars: [".", ",", "!", "?", ";", ":"]
@@ -102,12 +103,7 @@ class TextUtils {
             goodbye: /\b(goodbye|good bye)\b/i
         };
     }
-    
-    containsAnyPunctuation(text) {
-        if (!text || typeof text !== "string") return false;
-        return Array.from(text).some((char) => this.puntuationChars.includes(char));
-    }
-    
+        
     searchWordInSentence(sentence, word) {
         if (!sentence || !word || typeof sentence !== "string" || typeof word !== "string") {
             return false;
@@ -315,9 +311,7 @@ class DeepgramSTTService {
             }
         }
     }
-    
-    
-    
+
     cleanup() {
         this.isShuttingDown = true;
         if (this.keepAliveInterval) {
@@ -350,7 +344,6 @@ class CallSession {
         // Packet counters
         this.receivedPackets = 0;
         this.inboundPackets = 0;
-        this.outboundPackets = 0;
         this.silencePackets = 0;
         
         // Audio buffering
@@ -388,7 +381,7 @@ class CallSession {
         this.statsTimer = setInterval(() => {
             if (this.receivedPackets > 0) {
                 logger.info(
-                            `Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}, outbound=${this.outboundPackets}, silence=${this.silencePackets}`
+                            `Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}, silence=${this.silencePackets}`
                             );
             }
         }, 10000);
@@ -403,13 +396,6 @@ class CallSession {
         }    
     }
     
-    stopFinalizeTimer() {
-    	if (this.finalizeTimer) {
-     		clearTimeout(this.finalizeTimer);
-       		this.finalizeTimer = null;
-        }
-    }
-    
     startFlushTimer() {
 		// Cancel the previous timer, if any        
 		this.stopFlushTimer();
@@ -422,19 +408,6 @@ class CallSession {
         this.flushTimer = setTimeout(() => {
             this.flushAudioBuffer();
         }, this.flushInterval);
-    }
-    
-    startFinalizeTimer() {
-    	stopFinalizeTimer();
-     
-     	if (this.isShuttingDown ) {
-      		return;
-        }
-        
-        // Schedule the timer
-        this.finalizeTimer = setTimeout(() => {
-            this.finalizeAudioBuffer();
-        }, this.finalizeInterval);
     }
     
     accumulateAudio(buffer) {
@@ -480,43 +453,32 @@ class CallSession {
             }));       
     }
     
-    finalizeAudioBuffer() {
-    	this.stopFinalizeTimer();
-        
-		if (this.sttService && this.sttService.connected) {
-  			this.sendFinalize();
-  		}
-
-		this.startFinalizeTimer();
-    }
-    
     _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0x68) {
-    	return true;
-//        try {
-//            const binary = Buffer.from(base64Payload, "base64");
-//            if (binary.length < 10) return true;
-//            
-//            let nonSilenceCount = 0;
-//            let samples = 0;
-//            
-//            // const hexValues = []; // Array to store hex values        
-//            
-//            for (let i = 0; i < binary.length; i += 8) { // adjust sampling as needed
-//                samples++;
-//                const byte = binary[i];
-//                // hexValues.push(byte.toString(16).padStart(2, "0"));           
-//                if (byte < mulawThreshold) nonSilenceCount++;
-//            }
-//            
-//            // Log all sampled hex byte values in one line
-//            // logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
-//            
-//            const ratio = nonSilenceCount / samples;
-//            return ratio > threshold;
-//        } catch (error) {
-//            logger.debug("Error checking audio energy", error);
-//            return true;
-//        }
+        try {
+            const binary = Buffer.from(base64Payload, "base64");
+            if (binary.length < 10) return true;
+            
+            let nonSilenceCount = 0;
+            let samples = 0;
+            
+            // const hexValues = []; // Array to store hex values        
+            
+            for (let i = 0; i < binary.length; i += 8) { // adjust sampling as needed
+                samples++;
+                const byte = binary[i];
+                // hexValues.push(byte.toString(16).padStart(2, "0"));           
+                if (byte < mulawThreshold) nonSilenceCount++;
+            }
+            
+            // Log all sampled hex byte values in one line
+            // logger.info(`Sampled byte sizes (hex): ${hexValues.join(" ")}`);
+            
+            const ratio = nonSilenceCount / samples;
+            return ratio > threshold;
+        } catch (error) {
+            logger.debug("Error checking audio energy", error);
+            return true;
+        }
     }
     
     _handleMessage(message) {
@@ -585,8 +547,7 @@ class CallSession {
                         this.inboundPackets++;
                         try {
                             const payload = data.media.payload;
-                            const hasAudio = this._hasAudioEnergy(payload);
-                            if (hasAudio) {
+                            if (!STRIP_SILENCE || this._hasAudioEnergy(payload)) {
                                 const rawAudio = audioBufferPool.decodeBase64(payload);
                                 if (!rawAudio) {
                                     logger.warn("Failed to decode audio payload");
@@ -598,11 +559,6 @@ class CallSession {
                             }
                         } catch (error) {
                             logger.error("Error processing audio payload", error);
-                        }
-                    } else {
-                        this.outboundPackets++;
-                        if (this.receivedPackets < 5) {
-                            logger.debug(`Received outbound audio packet, track: ${data.media.track}`);
                         }
                     }
                 } else {
@@ -634,7 +590,7 @@ class CallSession {
         if (!this.active || this.hangupInitiated) return;
         try {
             if (isFinal) {
-                logger.info(`F] ${transcript}`);
+                logger.info(`[Final] ${transcript}`);
             } else {
                 logger.info(`${transcript}`);
             }
