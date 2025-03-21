@@ -5,6 +5,166 @@ const url = require("url");
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
 require("dotenv").config();
 
+const scamPhrases_1 = [
+  "hangup",
+  "hang up",
+  "hang on", // !!! 'hang up' gets transcribed to 'hang on' frequently. TODO: Remove
+  "i love you",
+  "soulmate",
+  "meant to be",
+  "help me",
+  "money for a ticket",
+  "urgent need",
+  "wedding plans",
+  "trust me",
+  "send me gift cards",
+  "i need your help",
+  "guaranteed return",
+  "risk free",
+  "act fast",
+  "limited time opportunity",
+  "secure your future",
+  "no risk",
+  "double your money",
+  "get rich quick",
+  "investment portfolio",
+  "exclusive deal",
+  "debt forgiveness",
+  "consolidate your loans",
+  "low interest rate",
+  "act now to reduce debt",
+  "past due payment",
+  "insurance claim overdue",
+  "urgent action required",
+  "policy cancellation",
+  "pay to reactivate",
+  "its me your grandson",
+  "help me out of trouble",
+  "i need bail money",
+  "dont tell mom",
+  "urgent family emergency",
+  "send money immediately",
+  "wire transfer needed",
+  "im in danger",
+  "please trust me",
+  "youve won",
+  "claim your prize",
+  "pay a fee to collect",
+  "cash transfer required",
+  "congratulations youre the winner",
+  "lottery winnings",
+  "exclusive prize claim",
+  "act fast to secure your prize",
+  "winner notification",
+  "your computer is at risk",
+  "remote access required",
+  "fix your account",
+  "service renewal",
+  "subscription fee",
+  "update your device",
+  "account locked",
+  "technical problem detected",
+  "call this number immediately",
+  "tax debt",
+  "unpaid taxes",
+  "irs agent",
+  "legal action required",
+  "arrest warrant issued",
+  "pay now to avoid penalties",
+  "urgent tax resolution",
+  "back taxes owed",
+  "settlement fee",
+  "tax relief services"];
+  
+class TranscriptHistory {
+	constructor( phrases ) {
+		const maxh = Math.max( 1, this._longestPhraseInWords( phrases )-1 ); 
+		this.maxHistory = maxh;
+  		this.history = new Array( maxh ).fill( "" );
+    	this.index = 0;
+     	this.scamPhrases = phrases;
+	}
+	
+	// Circular buffer
+	push( transcript ) {
+	
+		console.log( "transcript: ", transcript );
+	
+		// Trim leading and trailing whitespace and collapse multiple
+  		// whitespaces into one      
+		let cleanTranscript = transcript
+        	.trim() // Remove leading/trailing whitespace
+            .toLowerCase() // Convert to lowercase
+  			.replace(/[^a-z0-9\s]/g, '') // Remove non-alphanumeric characters (preserves spaces)
+  			.replace(/\s+/g, ' '); // Collapse multiple spaces into one
+     
+     	if( cleanTranscript.length == 0 ) return;
+      
+		this.history[ this.index % this.maxHistory ] = cleanTranscript;
+  		this.index++;
+	}
+	
+	// Return a flattened transcript rewinding numWordsBack
+	flatten( numWordsBack ) {
+	
+		if( this.index <= 0 ) return "";
+  
+    	let lastInHistory = this.history[ (this.index-1) % this.maxHistory ];         
+  		if( numWordsBack == 0 ) return lastInHistory;
+        
+        let flat = "";
+        
+		for( let i=1; i<this.maxHistory; i++ ) {
+  			if( (i+1)>this.index ) break;     
+     		let hidx = (this.index-i-1) % this.maxHistory;       
+       		const words = this.history[ hidx ].split( ' ' );
+         	if ( words == 0 ) continue;      
+         
+         	const lastWords = words.slice( -numWordsBack );
+          	let joinedWords = lastWords.join( ' ' );
+            if( joinedWords.length>0 && flat.length>0) joinedWords += " ";
+          
+          	flat = joinedWords + flat;
+           
+           	if( numWordsBack <= lastWords.length ) break;
+            
+            numWordsBack -= lastWords.length;          
+  		}
+        
+    	if( flat.length>0 && lastInHistory.length>0) flat += " ";
+    
+    	return flat + lastInHistory;			      
+	}
+	
+	findScamPhrases() {
+	
+		let flat = this.flatten( this.maxHistory-1 );
+  		if( flat.length == 0 ) return;      
+	
+    	for( let phrase of this.scamPhrases ) {
+     		if( flat.includes( phrase )) {
+       			console.log( "found: '" + phrase + "'" );      
+       			return true;
+            }
+    	}
+     
+     	return false;   
+	}
+		
+	_longestPhraseInWords( arrayOfPhrases ) {
+  		let maxWordCount = 0;
+  
+  		for( let phrase of arrayOfPhrases ) {
+    		const wordCount = phrase.split(/\s+/).filter(word => word.length > 0).length;
+    		if( wordCount > maxWordCount ) {
+      			maxWordCount = wordCount;
+    		}
+  		}
+  
+  		return maxWordCount;	
+	}	
+}
+
 // Simplified logger
 const log = {
   info: (msg, data) => console.log(`${msg}`, data || ""),
@@ -45,10 +205,6 @@ const config = (() => {
         utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
       },
       throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 20
-    },
-    commands: {
-      hangup: /\b(hangup|hang up)\b/i,
-      goodbye: /\b(goodbye|good bye)\b/i
     }
   };
 })();
@@ -61,16 +217,16 @@ class TwilioService {
     this.VoiceResponse = require("twilio").twiml.VoiceResponse;
   }
   
-  async hangupCall(callSid) {
+  async runTwilioFlow(callSid) {
     try {
-      log.info(`Initiating hangup for call: ${callSid}`);
+      log.info(`Calling Twilio flow: ${callSid}`);
       const execution = await this.client.studio.v2
         .flows(this.config.studioFlowId)
         .executions(callSid);
-      log.info("Call hangup executed", { executionSid: execution.sid });
+      log.info("Flow executed", { executionSid: execution.sid });
       return execution;
     } catch (error) {
-      log.error("Failed to hangup call", error);
+      log.error("Failed to call flow", error);
       throw error;
     }
   }
@@ -290,6 +446,11 @@ class CallSession {
         responseTimes: { inbound: [], outbound: [] }
       }
     };
+    
+    this.transcriptHistory = {
+    	inbound: new TranscriptHistory( scamPhrases_1 ),
+    	outbound: new TranscriptHistory( scamPhrases_1 )
+	};
     
     // Initialize STT services - one for each track
     this.sttService = {
@@ -616,17 +777,11 @@ class CallSession {
     if (!this.active || this.hangupInitiated) return;
     
     log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
-    
-    // Only process commands from the inbound track
-    if (track === 'inbound' && isFinal) {
-      // Check for commands in transcript
-      if (config.commands.hangup.test(transcript)) {
-        log.info("Hangup command detected in transcript");
-        this._handleHangup("Thank you for calling. Goodbye.");
-      } else if (config.commands.goodbye.test(transcript)) {
-        log.info("Goodbye command detected in transcript");
-        this._handleHangup("We appreciate your call. Have a great day!");
-      }
+        
+    this.transcriptHistory[ track ].push( transcript );
+    if( this.transcriptHistory[ track ].findScamPhrases() ) {    
+        log.info("Scam phrase detected in transcript");
+        this._handleHangup("Scam phrase detected. Goodbye.");
     }
   }
   
@@ -639,13 +794,10 @@ class CallSession {
     if (!this.active || !this.callSid || this.hangupInitiated) return;
     
     try {
-      this.hangupInitiated = true;
-      log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
+    	this.hangupInitiated = true;
+      	log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
       
-      if (customPhrase) {
         await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
-      } else {
-        await this.services.twilioService.hangupCall(this.callSid);
       }
     } catch (error) {
       log.error("Failed to hang up call", error);
