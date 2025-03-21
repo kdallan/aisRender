@@ -714,7 +714,7 @@ class CallSession {
                 return;
             }
             
-        	log.debug("JSON:", JSON.stringify(data, null, 2));            
+        	log.info("JSON:", JSON.stringify(data, null, 2));            
             
             // Process by event type
             switch (data.event) {
