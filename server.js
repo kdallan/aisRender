@@ -1,5 +1,6 @@
 // Import required modules
 const http = require("http");
+const https = require('https');
 const WebSocket = require("ws");
 const url = require("url");
 const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
