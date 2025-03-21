@@ -238,7 +238,7 @@ class TwilioService {
             log.info(`Saying phrase and hanging up call ${callSid}: "${phrase}"`);
             const twiml = new this.VoiceResponse();
             twiml.say({ voice: "Polly.Amy-Neural", language: "en-US" }, phrase);
-            twiml.hangup();
+            twiml.leave();
             
             const result = await this.client.calls(callSid).update({ twiml: twiml.toString() });
             log.info(`Call ${callSid} successfully updated with TwiML`);
