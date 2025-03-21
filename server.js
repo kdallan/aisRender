@@ -694,9 +694,7 @@ class CallSession {
             } else {
                 return;
             }
-            
-            log.info("JSON:", JSON.stringify(data, null, 2));            
-            
+                        
             // Process by event type
             switch (data.event) {
             case "connected":
@@ -708,6 +706,8 @@ class CallSession {
                 if (this.callSid) {
                     log.info(`Twilio: Call started, SID: ${this.callSid}`);
                 }
+
+            	log.info("JSON:", JSON.stringify(data, null, 2));                
                 break;
                 
             case "media":
