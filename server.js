@@ -794,14 +794,17 @@ class CallSession {
     if (!this.active || !this.callSid || this.hangupInitiated) return;
     
     try {
-    	this.hangupInitiated = true;
-      	log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
+    
+      this.hangupInitiated = true;
+      log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
       
-        await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
-      }
+      await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
+      
     } catch (error) {
+    
       log.error("Failed to hang up call", error);
       this.hangupInitiated = false;
+      
     }
   }
   
