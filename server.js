@@ -209,6 +209,43 @@ const config = (() => {
     };
 })();
 
+function addParticipant( phoneNumber, conferenceName ) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+  const postData = `phoneNumber=${encodeURIComponent(phoneNumber)}&conferenceName=${encodeURIComponent(conferenceName)}`;
+
+  const options = {
+    hostname: 'createconference-2381.twil.io',
+    path: '/add-participant',
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(postData),
+    },
+  };
+
+  const req = https.request(options, (res) => {
+    let data = '';
+
+    res.on('data', (chunk) => {
+      data += chunk;
+    });
+
+    res.on('end', () => {
+      console.log('Response:', data);
+    });
+  });
+
+  req.on('error', (e) => {
+    console.error(`Request error: ${e.message}`);
+  });
+
+  req.write(postData);
+  req.end();
+}
+
 // TwilioService
 class TwilioService {
     constructor(config) {
@@ -402,6 +439,7 @@ class CallSession {
         this.ws = webSocket;
         this.services = services;
         this.callSid = null;
+        this.conferenceName = "";
         this.streamSid = null;
         this.active = true;
         this.hangupInitiated = false;
@@ -706,6 +744,11 @@ class CallSession {
                 if (this.callSid) {
                     log.info(`Twilio: Call started, SID: ${this.callSid}`);
                 }
+                
+                this.conferenceName = data.start?.customParameters?.conferenceName;
+                if( this.conferenceName ) {
+                    log.info(`\tConference name: ${this.conferenceName}`);
+                }
 
             	log.info("JSON:", JSON.stringify(data, null, 2));                
                 break;
@@ -775,7 +818,8 @@ class CallSession {
             this.hangupInitiated = true;
             log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
             
-            await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
+            // await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
+            connectParticipent( "+12063498679", this.conferenceName );
             
         } catch (error) {
             
