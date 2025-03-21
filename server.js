@@ -316,13 +316,6 @@ class DeepgramSTTService {
             this.connected = true;
             this.reconnectAttempts = 0;
             
-            if( !data ) {
-            	log.info( "_setupEventListeners: Data is null" );
-             	return;
-            }
-             
-            log.info( "_setupEventListeners (data): " + JSON.stringify(data, null, 2));
-            
             // Transcript event
             this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
                 const transcript = data.channel?.alternatives?.[0]?.transcript;
