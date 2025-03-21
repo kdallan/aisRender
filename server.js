@@ -780,8 +780,6 @@ class CallSession {
         } catch (error) {
             
             log.error("Failed to hang up call", error);
-            this.hangupInitiated = false;
-            
         }
     }
     
