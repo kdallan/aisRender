@@ -819,7 +819,7 @@ class CallSession {
             log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
             
             // await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
-            connectParticipent( "+12063498679", this.conferenceName );
+            addParticipant( "+12063498679", this.conferenceName );
             
         } catch (error) {
             
