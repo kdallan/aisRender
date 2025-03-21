@@ -410,7 +410,6 @@ class CallSession {
         // Counters and audio handling
         this.receivedPackets = 0;
         this.inboundPackets = 0;
-        this.silencePackets = 0;
         
         // 1. SEPARATE TRACK PROCESSING - Create separate buffers for each track
         this.audioAccumulator = { inbound: [], outbound: [] };
@@ -475,7 +474,7 @@ class CallSession {
         this.statsTimer = setInterval(() => {
             if (this.receivedPackets > 0) {
                 // Regular stats
-                log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}, silence=${this.silencePackets}`);
+                log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}`);
                 
                 // 5. PERFORMANCE MONITORING - Log enhanced metrics
                 const now = Date.now();
@@ -681,24 +680,6 @@ class CallSession {
         }
     }
     
-    _hasAudioEnergy(base64Payload, threshold = 0.2, mulawThreshold = 0x68) {
-        try {
-            const binary = Buffer.from(base64Payload, "base64");
-            if (binary.length < 10) return true;
-            
-            let nonSilenceCount = 0;
-            const samples = Math.ceil(binary.length / 8);
-            
-            for (let i = 0; i < binary.length; i += 8) {
-                if (binary[i] < mulawThreshold) nonSilenceCount++;
-            }
-            
-            return nonSilenceCount / samples > threshold;
-        } catch {
-            return true;
-        }
-    }
-    
     // Message handling
     _handleMessage(message) {
         if (!this.active) return;
@@ -714,7 +695,7 @@ class CallSession {
                 return;
             }
             
-        	log.info("JSON:", JSON.stringify(data, null, 2));            
+            log.info("JSON:", JSON.stringify(data, null, 2));            
             
             // Process by event type
             switch (data.event) {
@@ -752,14 +733,8 @@ class CallSession {
                         const payload = data.media.payload;
                         const track = data.media.track;
                         
-                        // Skip processing if it's silence
-                        const STRIP_SILENCE = false;
-                        if (!STRIP_SILENCE || this._hasAudioEnergy(payload)) {
-                            const rawAudio = Buffer.from(payload, "base64");
-                            this.accumulateAudio(rawAudio, track); // Pass track information
-                        } else {
-                            this.silencePackets++;
-                        }
+                        const rawAudio = Buffer.from(payload, "base64");
+                        this.accumulateAudio(rawAudio, track);
                     }
                 }
                 break;
