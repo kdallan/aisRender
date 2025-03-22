@@ -221,7 +221,7 @@ function addParticipant( phoneNumber, conferenceName ) {
     path: '/add-participant',
     method: 'POST',
     headers: {
-      // 'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+      'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
       'Content-Type': 'application/x-www-form-urlencoded',
       'Content-Length': Buffer.byteLength(postData),
     },
