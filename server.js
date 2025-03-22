@@ -221,7 +221,7 @@ function addParticipant( phoneNumber, conferenceName ) {
     path: '/add-participant',
     method: 'POST',
     headers: {
-      'Authorization': 'Basic ' + `${accountSid}:${authToken}`,
+      'Authorization': 'Bearer ' + `${accountSid}:${authToken}`,
       'Content-Type': 'application/x-www-form-urlencoded',
       'Content-Length': Buffer.byteLength(postData),
     },
@@ -240,7 +240,7 @@ function addParticipant( phoneNumber, conferenceName ) {
   });
 
   req.on('error', (e) => {
-    console.error(`Request error: ${e}`);
+    console.error(`Request error: ${e.message}`);
   });
 
   req.write(postData);
