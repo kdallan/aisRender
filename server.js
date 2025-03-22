@@ -240,7 +240,7 @@ function addParticipant( phoneNumber, conferenceName ) {
   });
 
   req.on('error', (e) => {
-    console.error(`Request error: ${e.message}`);
+    console.error(`Request error: ${e}`);
   });
 
   req.write(postData);
