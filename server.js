@@ -819,8 +819,7 @@ class CallSession {
             this.hangupInitiated = true;
             log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
             
-            // await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
-            addParticipant( "+12063498679", this.conferenceName );
+            await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
             
         } catch (error) {
             
