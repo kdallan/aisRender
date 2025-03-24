@@ -334,7 +334,7 @@ class CallSession {
                     // 4. ERROR RESILIENCE - Reset error counter on success
                     this.consecutiveErrors[track] = 0;
                 } else {
-                    log.warn(`STT service not connected for ${track} track, dropping ${this.audioAccumulatorSize[track]} audio bytes`);
+                    log.warn(`STT service not connected for ${track} track, buffering ${this.audioAccumulatorSize[track]} audio bytes`);
                     log.warn(`            accumulated buffer size: ${bufferSize}`);
                     if( bufferSize > 64*1024 ) {
                     	this.consecutiveErrors[track]++; // Deepgram not keeping up?
