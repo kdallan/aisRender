@@ -1,9 +1,11 @@
 // Import required modules
-const http = require("http");
-const https = require('https');
-const WebSocket = require("ws");
-const url = require("url");
-const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
+const http = require( "http" );
+const https = require( "https" );
+const WebSocket = require( "ws" );
+const TranscriptHistory = require( "./transcripthistory" );
+const { addParticipant, TwilioService } = require('./commands');
+const DeepgramSTTService = require('./deepgramstt');
+
 require("dotenv").config();
 
 const scamPhrases_1 = [
@@ -77,95 +79,6 @@ const scamPhrases_1 = [
     "settlement fee",
     "tax relief services"];
 
-class TranscriptHistory {
-    constructor( phrases ) {
-        const maxh = Math.max( 1, this._longestPhraseInWords( phrases )-1 ); 
-        this.maxHistory = maxh;
-        this.history = new Array( maxh ).fill( "" );
-        this.index = 0;
-        this.scamPhrases = phrases;
-    }
-    
-    // Circular buffer
-    push( transcript ) {
-        
-        console.log( "transcript: ", transcript );
-        
-        // Trim leading and trailing whitespace and collapse multiple
-        // whitespaces into one      
-        let cleanTranscript = transcript
-        .trim() // Remove leading/trailing whitespace
-        .toLowerCase() // Convert to lowercase
-        .replace(/[^a-z0-9\s]/g, '') // Remove non-alphanumeric characters (preserves spaces)
-        .replace(/\s+/g, ' '); // Collapse multiple spaces into one
-        
-        if( cleanTranscript.length == 0 ) return;
-        
-        this.history[ this.index % this.maxHistory ] = cleanTranscript;
-        this.index++;
-    }
-    
-    // Return a flattened transcript rewinding numWordsBack
-    flatten( numWordsBack ) {
-        
-        if( this.index <= 0 ) return "";
-        
-        let lastInHistory = this.history[ (this.index-1) % this.maxHistory ];         
-        if( numWordsBack == 0 ) return lastInHistory;
-        
-        let flat = "";
-        
-        for( let i=1; i<this.maxHistory; i++ ) {
-            if( (i+1)>this.index ) break;     
-            let hidx = (this.index-i-1) % this.maxHistory;       
-            const words = this.history[ hidx ].split( ' ' );
-            if ( words == 0 ) continue;      
-            
-            const lastWords = words.slice( -numWordsBack );
-            let joinedWords = lastWords.join( ' ' );
-            if( joinedWords.length>0 && flat.length>0) joinedWords += " ";
-            
-            flat = joinedWords + flat;
-            
-            if( numWordsBack <= lastWords.length ) break;
-            
-            numWordsBack -= lastWords.length;          
-        }
-        
-        if( flat.length>0 && lastInHistory.length>0) flat += " ";
-        
-        return flat + lastInHistory;			      
-    }
-    
-    findScamPhrases() {
-        
-        let flat = this.flatten( this.maxHistory-1 );
-        if( flat.length == 0 ) return;      
-        
-        for( let phrase of this.scamPhrases ) {
-            if( flat.includes( phrase )) {
-                console.log( "found: '" + phrase + "'" );      
-                return true;
-            }
-        }
-        
-        return false;   
-    }
-    
-    _longestPhraseInWords( arrayOfPhrases ) {
-        let maxWordCount = 0;
-        
-        for( let phrase of arrayOfPhrases ) {
-            const wordCount = phrase.split(/\s+/).filter(word => word.length > 0).length;
-            if( wordCount > maxWordCount ) {
-                maxWordCount = wordCount;
-            }
-        }
-        
-        return maxWordCount;	
-    }	
-}
-
 // Simplified logger
 const log = {
     info: (msg, data) => console.log(`${msg}`, data || ""),
@@ -210,229 +123,6 @@ const config = (() => {
     };
 })();
 
-function addParticipant( phoneNumber, conferenceName ) {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-  const postData = `phoneNumber=${encodeURIComponent(phoneNumber)}&conferenceName=${encodeURIComponent(conferenceName)}`;
-
-  const options = {
-    hostname: 'createconference-2381.twil.io',
-    path: '/add-participant',
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + `${accountSid}:${authToken}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Content-Length': Buffer.byteLength(postData),
-    },
-  };
-
-  const req = https.request(options, (res) => {
-    let data = '';
-
-    res.on('data', (chunk) => {
-      data += chunk;
-    });
-
-    res.on('end', () => {
-      console.log('Response:', data);
-    });
-  });
-
-  req.on('error', (e) => {
-    console.error(`Request error: ${e.message}`);
-  });
-
-  req.write(postData);
-  req.end();
-}
-
-// TwilioService
-class TwilioService {
-    constructor(config) {
-        this.config = config;
-        this.client = require("twilio")(config.accountSid, config.authToken);
-        this.VoiceResponse = require("twilio").twiml.VoiceResponse;
-    }
-    
-    async runTwilioFlow(callSid) {
-        try {
-            log.info(`Calling Twilio flow: ${callSid}`);
-            const execution = await this.client.studio.v2
-            .flows(this.config.studioFlowId)
-            .executions(callSid);
-            log.info("Flow executed", { executionSid: execution.sid });
-            return execution;
-        } catch (error) {
-            log.error("Failed to call flow", error);
-            throw error;
-        }
-    }
-    
-    async sayPhraseAndHangup(callSid, phrase) {
-        if (!callSid) throw new Error("Call SID is required");
-        
-        try {
-            log.info(`Saying phrase and hanging up call ${callSid}: "${phrase}"`);
-            const twiml = new this.VoiceResponse();
-            twiml.say({ voice: "Polly.Amy-Neural", language: "en-US" }, phrase);
-            twiml.leave();
-            
-            const result = await this.client.calls(callSid).update({ twiml: twiml.toString() });
-            log.info(`Call ${callSid} successfully updated with TwiML`);
-            return result;
-        } catch (error) {
-            log.error(`Failed to update call ${callSid} with TwiML`, error);
-            throw error;
-        }
-    }
-}
-
-// DeepgramSTTService
-class DeepgramSTTService {
-    constructor(config, onTranscript, onUtteranceEnd) {
-        this.config = config;
-        this.onTranscript = onTranscript;
-        this.onUtteranceEnd = onUtteranceEnd;
-        this.client = createClient(config.apiKey);
-        this.deepgram = null;
-        this.isFinals = [];
-        this.connected = false;
-        this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
-        this.reconnectDelay = 1000;
-        this.isShuttingDown = false;
-        this.keepAliveInterval = null;
-        
-        this.connect();
-    }
-    
-    connect() {
-        if (this.isShuttingDown) return;
-        
-        try {
-            log.info(this.reconnectAttempts > 0 
-                     ? `Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`
-                     : "Connecting to Deepgram...");
-            
-            this.deepgram = this.client.listen.live(this.config.sttConfig);
-            
-            if (this.keepAliveInterval) clearInterval(this.keepAliveInterval);
-            this.keepAliveInterval = setInterval(() => {
-                if (this.deepgram && this.connected) this.deepgram.keepAlive();
-            }, 10000);
-            
-            this._setupEventListeners();
-            return this.deepgram;
-        } catch (error) {
-            log.error("Failed to connect to Deepgram STT", error);
-            this._handleConnectionFailure();
-            return null;
-        }
-    }
-    
-    _handleConnectionFailure() {
-        this.connected = false;
-        
-        if (this.isShuttingDown) return; // Don't try to reconnect if we shut down
-        
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-            log.info(`Will attempt to reconnect in ${delay}ms...`);
-            setTimeout(() => this.connect(), delay);
-        } else {
-            log.error(`Failed to reconnect after ${this.maxReconnectAttempts} attempts`);
-            this.reconnectAttempts = 0;
-        }
-    }
-    
-    _setupEventListeners() {
-        // Open event
-        this.deepgram.addListener(LiveTranscriptionEvents.Open, () => {
-            log.info("Deepgram STT connection opened");
-            this.connected = true;
-            this.reconnectAttempts = 0;
-            
-            // Transcript event
-            this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-                const transcript = data.channel?.alternatives?.[0]?.transcript;
-                if (!transcript) return;
-                
-                if (!data.is_final) {
-                    this.onTranscript?.(transcript, false);
-                    return;
-                }
-                
-                this.isFinals.push(transcript);
-                if (data.speech_final) {
-                    this.onTranscript?.(this.isFinals.join(" "), true);
-                    this.isFinals = [];
-                } else {
-                    this.onTranscript?.(transcript, true);
-                }
-            });
-            
-            // Utterance end event
-            this.deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, () => {
-                if (this.isFinals.length > 0) {
-                    this.onUtteranceEnd?.(this.isFinals.join(" "));
-                    this.isFinals = [];
-                }
-            });
-        });
-        
-        // Error and close events
-        this.deepgram.addListener(LiveTranscriptionEvents.Close, () => {
-            log.info("Deepgram STT connection closed");
-            this.connected = false;
-            this._handleConnectionFailure();
-        });
-        
-        this.deepgram.addListener(LiveTranscriptionEvents.Error, (error) => {
-            log.error("Deepgram STT error", error);
-            if (!this.connected) this._handleConnectionFailure();
-        });
-        
-        this.deepgram.addListener(LiveTranscriptionEvents.Warning, (warning) => {
-            log.warn("Deepgram STT warning", warning);
-        });
-    }
-    
-    send(audioData) {
-        if (!this.connected || !this.deepgram || !audioData || !Buffer.isBuffer(audioData) || audioData.length === 0) return;
-        
-        try {
-            this.deepgram.send(audioData);
-        } catch (error) {
-            log.error("Failed to send audio to Deepgram", error);
-            if (error.message?.includes("not open")) {
-                this.connected = false;
-                this._handleConnectionFailure();
-            }
-        }
-    }
-    
-    cleanup() {
-        this.isShuttingDown = true;
-        
-        if (this.keepAliveInterval) {
-            clearInterval(this.keepAliveInterval);
-            this.keepAliveInterval = null;
-        }
-        
-        if (this.deepgram) {
-            try {
-                this.deepgram.requestClose();
-            } catch (error) {
-                log.error("Error while closing Deepgram connection", error);
-            }
-            this.deepgram = null;
-        }
-        
-        this.connected = false;
-    }
-}
 
 // CallSession - Optimized version with Deepgram data tracking
 class CallSession {
@@ -467,7 +157,7 @@ class CallSession {
         // 4. ERROR RESILIENCE - Add maximum sizes and circuit breaker
         this.MAX_BUFFER_SIZE = 30 * 1024; // 30 KB absolute maximum
         this.consecutiveErrors = { inbound: 0, outbound: 0 };
-        this.MAX_CONSECUTIVE_ERRORS = 5;
+        this.MAX_CONSECUTIVE_ERRORS = 15;
         
         // 5. PERFORMANCE MONITORING - Enhanced with Deepgram data tracking
         this.metrics = {
@@ -643,8 +333,11 @@ class CallSession {
                     // 4. ERROR RESILIENCE - Reset error counter on success
                     this.consecutiveErrors[track] = 0;
                 } else {
-                    log.warn(`STT service not connected for ${track} track, dropping audio`);
-                    this.consecutiveErrors[track]++;
+                    log.warn(`STT service not connected for ${track} track, dropping $(this.audioAccumulatorSize[track]) audio bytes`);
+                    log.warn(`            accumulated buffer size: ${bufferSize}`);
+                    if( bufferSize > 64*1024 ) {
+                    	this.consecutiveErrors[track]++; // Deepgram not keeping up?
+                    }
                 }
             } catch (error) {
                 log.error(`Error sending ${track} audio to Deepgram`, error);
@@ -733,7 +426,7 @@ class CallSession {
             } else {
                 return;
             }
-                        
+            
             // Process by event type
             switch (data.event) {
             case "connected":
@@ -750,8 +443,8 @@ class CallSession {
                 if( this.conferenceName ) {
                     log.info(`\tConference name: ${this.conferenceName}`);
                 }
-
-            	log.info("JSON:", JSON.stringify(data, null, 2));                
+                
+                log.info("JSON:", JSON.stringify(data, null, 2));                
                 break;
                 
             case "media":
@@ -892,7 +585,9 @@ class VoiceServer {
         };
         
         this.httpServer = http.createServer((req, res) => {
-            if (url.parse(req.url).pathname === "/") {
+            // Use the WHATWG URL API, passing a base URL based on the request
+            const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
+            if (parsedUrl.pathname === "/") {
                 res.writeHead(200, { "Content-Type": "text/plain" });
                 res.end("aiShield Monitor");
             } else {
