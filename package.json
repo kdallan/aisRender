@@ -13,9 +13,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@deepgram/sdk": "^3.4.4",
-    "dotenv": "^16.4.5",
-    "twilio": "^5.5.0",
-    "ws": "^8.13.0"
+    "@deepgram/sdk": "^3.11.2",
+    "dotenv": "^16.4.7",
+    "twilio": "^5.5.1",
+    "ws": "^8.18.1"
   }
 }
