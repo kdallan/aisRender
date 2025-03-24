@@ -1,6 +1,4 @@
 function createNode() {
-    // Each node has an array of length 27:
-    // 0..25 => 'a'..'z', 26 => ' ' (space)
     return {
         goto: new Array(27).fill(null),
         fail: null,
@@ -8,29 +6,26 @@ function createNode() {
     };
 }
 
-/**
- * Map a character in [a-z ] to an integer [0..26].
- * 'a' -> 0, 'b' -> 1, ..., 'z' -> 25, ' ' -> 26
- */
 function charToIndex(c) {
     return (c === ' ') ? 26 : (c.charCodeAt(0) - 97);
 }
 
 class AhoCorasick {
     /**
-     * Build an Aho-Corasick automaton from an array of patterns,
-     * each guaranteed to be [a-z ] only.
-     * @param {string[]} patterns
+     * Build an Aho-Corasick automaton from an array of phrase objects.
+     * Each object should have at least `phrase` and `type` properties.
+     * @param {{phrase: string, type: string, command?: object}[]} phrases
      */
-    constructor(patterns) {
-        this.patterns = [];
+    constructor(phrases) {
+        // Store objects and their phrase lengths
+        this.phrases = [];
         this.patternLengths = [];
 
-        // Normalize and store valid patterns
-        for (const p of patterns) {
-            const norm = p.trim(); // guaranteed lower + space
+        for (const p of phrases) {
+            const norm = p.phrase.trim();
             if (norm.length > 0) {
-                this.patterns.push(norm);
+                // Store a copy with normalized phrase
+                this.phrases.push({ ...p, phrase: norm });
                 this.patternLengths.push(norm.length);
             }
         }
@@ -45,16 +40,12 @@ class AhoCorasick {
         this.buildFailureAndOutputFunctions();
     }
 
-    /**
-     * Build the trie transitions (goto function)
-     */
     buildGotoFunction() {
-        const { patterns, root } = this;
+        const { phrases, root } = this;
 
-        for (let i = 0; i < patterns.length; i++) {
+        for (let i = 0; i < phrases.length; i++) {
             let current = root;
-            const pattern = patterns[i];
-
+            const pattern = phrases[i].phrase;
             for (let j = 0; j < pattern.length; j++) {
                 const idx = charToIndex(pattern[j]);
                 if (current.goto[idx] === null) {
@@ -67,15 +58,10 @@ class AhoCorasick {
         }
     }
 
-    /**
-     * Build the failure links and merge output from those failure states
-     * using a BFS traversal.
-     */
     buildFailureAndOutputFunctions() {
         const { root } = this;
         root.fail = root;
 
-        // Pointer-based BFS queue
         const queue = [];
         let head = 0, tail = 0;
 
@@ -91,22 +77,15 @@ class AhoCorasick {
         // BFS
         while (head < tail) {
             const current = queue[head++];
-
-            // Check all possible transitions from 'current'
             for (let i = 0; i < 27; i++) {
                 const child = current.goto[i];
-                if (child === null) {
-                    continue;
-                }
-
+                if (child === null) continue;
                 queue[tail++] = child;
 
-                // Find the correct fail state
                 let failState = current.fail;
                 while (failState !== root && failState.goto[i] === null) {
                     failState = failState.fail;
                 }
-
                 child.fail = failState.goto[i] || root;
 
                 // Merge output from fail state
@@ -119,78 +98,75 @@ class AhoCorasick {
 
     /**
      * Return an array of all pattern matches in the given text.
-     * The text is guaranteed to contain only [a-z ].
-     * @param {string} text
-     * @returns {Array<{pattern: string, position: number}>}
+     * Each match is returned as a JSON object with its meta-data.
+     * @param {string} text  // text should be normalized: lower-case and [a-z ] only.
+     * @returns {Array<{phrase: string, type: string, [command]?: object}>}
      */
     search(text) {
         if (!text) return [];
-
         const matches = [];
-        const { root, patterns, patternLengths } = this;
-
+        const { root, phrases, patternLengths } = this;
         let current = root;
         const len = text.length;
 
         for (let i = 0; i < len; i++) {
             const idx = charToIndex(text[i]);
-
-            // Follow fail links if we can't move on idx
             while (current !== root && current.goto[idx] === null) {
                 current = current.fail;
             }
-
             if (current.goto[idx]) {
                 current = current.goto[idx];
             }
-
-            // Check if this node outputs any pattern(s)
             if (current.output.length > 0) {
                 for (const patternIndex of current.output) {
                     const patternLen = patternLengths[patternIndex];
+                    // Return the entire phrase object with additional match info
                     matches.push({
-                        pattern: this.patterns[patternIndex],
-                        position: i - patternLen + 1
+                        phrase: phrases[patternIndex].phrase,
+                        type: phrases[patternIndex].type,
+                        ...(phrases[patternIndex].command ? { command: phrases[patternIndex].command } : {})
                     });
                 }
             }
         }
-
         return matches;
     }
 
-    /**
-     * Return true if any pattern is found in the given text.
-     * The text is guaranteed to contain only [a-z ].
-     * @param {string} text
-     * @returns {boolean}
-     */
-    containsAny(text) {
-        if (!text) return false;
+/**
+ * Return a JSON object for the first found pattern match in the given text.
+ * If no match is found, returns undefined.
+ * The text is guaranteed to contain only [a-z ].
+ * @param {string} text
+ * @returns {{ phrase: string, type: string, [command]?: object } | undefined}
+ */
+containsAny(text) {
+    if (!text) return undefined;
+    const { root, phrases, patternLengths } = this;
+    let current = root;
+    const len = text.length;
 
-        const { root } = this;
-        let current = root;
-        const len = text.length;
-
-        for (let i = 0; i < len; i++) {
-            const idx = charToIndex(text[i]);
-
-            while (current !== root && current.goto[idx] === null) {
-                current = current.fail;
-            }
-
-            if (current.goto[idx]) {
-                current = current.goto[idx];
-            }
-
-            // If this node has any patterns, we're done
-            if (current.output.length > 0) {
-                return true;
-            }
+    for (let i = 0; i < len; i++) {
+        const idx = charToIndex(text[i]);
+        while (current !== root && current.goto[idx] === null) {
+            current = current.fail;
         }
-
-        return false;
+        if (current.goto[idx]) {
+            current = current.goto[idx];
+        }
+        if (current.output.length > 0) {
+            // Return the first matching phrase as JSON
+            const patternIndex = current.output[0];
+            const patternLen = patternLengths[patternIndex];
+            return {
+                phrase: phrases[patternIndex].phrase,
+                type: phrases[patternIndex].type,
+                ...(phrases[patternIndex].command ? { command: phrases[patternIndex].command } : {})
+            };
+        }
     }
+    return null;
+}
+
 }
 
 module.exports = AhoCorasick;

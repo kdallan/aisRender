@@ -93,7 +93,7 @@ class TranscriptHistory {
   _longestPhraseInWords(phrases) {
     let max = 0;
     for (const phrase of phrases) {
-      const count = phrase.trim().split(/\s+/).length;
+      const count = phrase.phrase.trim().split(/\s+/).length;
       if (count > max) max = count;
     }
     return max;
