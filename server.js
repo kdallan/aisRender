@@ -494,8 +494,10 @@ class CallSession {
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
         
         this.transcriptHistory[ track ].push( transcript );
-        if( this.transcriptHistory[ track ].findScamPhrases() ) {    
-            log.info("Scam phrase detected in transcript");
+        
+        let hit = this.transcriptHistory[ track ].findScamPhrases();
+        if( hit !== null ) {    
+            log.info("Scam phrase: " + JSON.stringify( hit, null, 2 ));
             this._handleHangup("Scam phrase detected. Goodbye.");
         }
     }
