@@ -97,7 +97,7 @@ const config = (() => {
     
     return {
         server: {
-            port: parseInt(process.env.PORT) || 8080
+            port: process.env.PORT || 8080
         },
         twilio: {
             accountSid: process.env.TWILIO_ACCOUNT_SID,
