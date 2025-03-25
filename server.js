@@ -144,21 +144,20 @@ class CallSession {
         this.active = true;
         this.hangupInitiated = false;
         
-        // Cache the buffer to decode "base64" into
-        
+        // Cache the buffer to decode "base64" into        
         this.decodeBuffer = Buffer.alloc( 4 * 1024 );
         
         // Counters and audio handling
         this.receivedPackets = 0;
         this.inboundPackets = 0;
         
-        // 1. SEPARATE TRACK PROCESSING - Create separate buffers for each track
+        // SEPARATE TRACK PROCESSING - Create separate buffers for each track
         this.audioAccumulator = { inbound: [], outbound: [] };
         this.audioAccumulatorSize = { inbound: 0, outbound: 0 };
         this.lastProcessingTime = { inbound: 0, outbound: 0 };
         this.processingStartTime = { inbound: 0, outbound: 0 };
         
-        // 2. ADAPTIVE BUFFER MANAGEMENT - Add parameters
+        // ADAPTIVE BUFFER MANAGEMENT - Add parameters
         this.bufferSizeThreshold = { inbound: 2 * 1024, outbound: 2 * 1024 }; // 2 KB initially
         this.flushTimer = { inbound: null, outbound: null };
         this.flushInterval = { 
@@ -166,28 +165,30 @@ class CallSession {
             outbound: this.services.config.deepgram.throttleInterval
         };
         
-        // 4. ERROR RESILIENCE - Add maximum sizes and circuit breaker
+        // ERROR RESILIENCE - Add maximum sizes and circuit breaker
         this.MAX_BUFFER_SIZE = 32 * 1024;
         this.consecutiveErrors = { inbound: 0, outbound: 0 };
         this.MAX_CONSECUTIVE_ERRORS = 15;
         
-        // 5. PERFORMANCE MONITORING - Enhanced with Deepgram data tracking
-        this.metrics = {
-            processingTimes: { inbound: [], outbound: [] },
-            bufferGrowth: { inbound: [], outbound: [] },
-            lastMetricTime: performance.now(),
-            delays: { inbound: 0, outbound: 0 },
-            // Add Deepgram data tracking
-            deepgram: {
-                bytesSent: { inbound: 0, outbound: 0 },
-                packetsSent: { inbound: 0, outbound: 0 },
-                sendRates: { inbound: [], outbound: [] },
-                lastSendTime: { inbound: performance.now(), outbound: performance.now() },
-                responseTimes: { inbound: [], outbound: [] }
-            }
-        };
+        if ( process.env.WANT_MONITORING ) {            
+            // PERFORMANCE MONITORING - Enhanced with Deepgram data tracking
+            this.metrics = {
+                processingTimes: { inbound: [], outbound: [] },
+                bufferGrowth: { inbound: [], outbound: [] },
+                lastMetricTime: performance.now(),
+                delays: { inbound: 0, outbound: 0 },
+                // Add Deepgram data tracking
+                deepgram: {
+                    bytesSent: { inbound: 0, outbound: 0 },
+                    packetsSent: { inbound: 0, outbound: 0 },
+                    sendRates: { inbound: [], outbound: [] },
+                    lastSendTime: { inbound: performance.now(), outbound: performance.now() },
+                    responseTimes: { inbound: [], outbound: [] }
+                }
+            };
+        }
         
-        // 6. PREALLOC BUFFERS
+        // PREALLOC BUFFERS
         this.audioAccumulator = {
             inbound: Buffer.alloc(this.MAX_BUFFER_SIZE),
             outbound: Buffer.alloc(this.MAX_BUFFER_SIZE)
@@ -222,33 +223,33 @@ class CallSession {
         this.ws.on("close", this._handleClose.bind(this));
         this.ws.on("error", (error) => log.error("WebSocket error:", error));
         
-        // Setup stats logging with enhanced metrics
-        this.statsTimer = setInterval(() => {
-            if (this.receivedPackets > 0) {
-                // Regular stats
-                log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}`);
-                
-                // 5. PERFORMANCE MONITORING - Log enhanced metrics
-                const now = performance.now();
-                const avgProcessingTimeInbound = this._calculateAverage(this.metrics.processingTimes.inbound);
-                const avgProcessingTimeOutbound = this._calculateAverage(this.metrics.processingTimes.outbound);
-                
-                log.info(`Performance metrics: 
-          Inbound: buffer=${this.audioAccumulatorSize.inbound} bytes, avgProcessing=${avgProcessingTimeInbound.toFixed(2)}ms, delay=${this.metrics.delays.inbound.toFixed(2)}ms
-          Outbound: buffer=${this.audioAccumulatorSize.outbound} bytes, avgProcessing=${avgProcessingTimeOutbound.toFixed(2)}ms, delay=${this.metrics.delays.outbound.toFixed(2)}ms`
-                         );
-                
-                // Log Deepgram stats
-                this.logDeepgramStats();
-                
-                // Reset metrics for next interval
-                this.metrics.processingTimes = { inbound: [], outbound: [] };
-                this.metrics.bufferGrowth = { inbound: [], outbound: [] };
-                this.metrics.lastMetricTime = now;
-            }
-        }, 30000);
-        
-        log.info("New call session created with optimized processing and data tracking");
+        if( process.env.WANT_MONITORING ) {
+            // Setup stats logging with enhanced metrics
+            this.statsTimer = setInterval(() => {
+                if (this.receivedPackets > 0) {
+                    // Regular stats
+                    log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}`);
+                    
+                    // PERFORMANCE MONITORING - Log enhanced metrics
+                    const now = performance.now();
+                    const avgProcessingTimeInbound = this._calculateAverage(this.metrics.processingTimes.inbound);
+                    const avgProcessingTimeOutbound = this._calculateAverage(this.metrics.processingTimes.outbound);
+                    
+                    log.info(`Performance metrics: 
+              Inbound: buffer=${this.audioAccumulatorSize.inbound} bytes, avgProcessing=${avgProcessingTimeInbound.toFixed(2)}ms, delay=${this.metrics.delays.inbound.toFixed(2)}ms
+              Outbound: buffer=${this.audioAccumulatorSize.outbound} bytes, avgProcessing=${avgProcessingTimeOutbound.toFixed(2)}ms, delay=${this.metrics.delays.outbound.toFixed(2)}ms`
+                             );
+                    
+                    // Log Deepgram stats
+                    this.logDeepgramStats();
+                    
+                    // Reset metrics for next interval
+                    this.metrics.processingTimes = { inbound: [], outbound: [] };
+                    this.metrics.bufferGrowth = { inbound: [], outbound: [] };
+                    this.metrics.lastMetricTime = now;
+                }
+            }, 30000);
+        }
     }
     
     // Helper for calculating averages
@@ -263,7 +264,7 @@ class CallSession {
         return `${(bytes / 1048576).toFixed(2)} MB`;
     }
     
-    // New method to log detailed Deepgram stats
+    // Log detailed Deepgram stats
     logDeepgramStats() {
         // Calculate average send rates
         const calcAvgRate = (rates) => rates.length > 0 
@@ -284,8 +285,16 @@ class CallSession {
         // Reset rate tracking (but keep totals)
         this.metrics.deepgram.sendRates = { inbound: [], outbound: [] };
     }
+
+	stopStatsTimer()
+	{    
+        if (this.statsTimer) {
+            clearInterval(this.statsTimer);
+            this.statsTimer = null;
+        }
+    }
     
-    // 3. IMPROVED TIMER LOGIC - Track-specific flush timer management
+    // IMPROVED TIMER LOGIC - Track-specific flush timer management
     stopFlushTimer(track) {
         if (this.flushTimer[track]) {
             clearTimeout(this.flushTimer[track]);
@@ -301,7 +310,7 @@ class CallSession {
             return;
         }
         
-        // 3. IMPROVED TIMER LOGIC - Adaptive interval based on processing time
+        // IMPROVED TIMER LOGIC - Adaptive interval based on processing time
         const baseInterval = this.flushInterval[track];
         const processingTime = this.lastProcessingTime[track];
         let interval = baseInterval;
@@ -412,8 +421,11 @@ class CallSession {
             this.audioAccumulatorOffset[track] = 0;
             const procTime = performance.now() - this.processingStartTime[track];
             this.lastProcessingTime[track] = procTime;
-            this.metrics.processingTimes[track].push(procTime);
-            this.metrics.deepgram.responseTimes[track].push(procTime);
+            
+	        if ( process.env.WANT_MONITORING ) {            
+    	        this.metrics.processingTimes[track].push(procTime);
+        	    this.metrics.deepgram.responseTimes[track].push(procTime);
+             }   
         }
         
         // Circuit breaker: if error count is too high, reset the STT service.
@@ -456,8 +468,8 @@ class CallSession {
             case "media": {
                 this.receivedPackets++;
                 
-                let payload = data.valueForKeyPath( "media.payload" );
-                let track = data.valueForKeyPath( "media.track" );
+                let payload = data.valueForKeyPath( "media.payload" ); // Not optional
+                let track = data.valueForKeyPath( "media.track" ); // Not optional
                 
                 if (track === "inbound" || track === "outbound") {
                     this.inboundPackets++; // Assuming both increment the same counter.
@@ -475,11 +487,11 @@ class CallSession {
                 
             case "start":
         		// this.callSid = data.start?.callSid || data.callSid;
-                this.callSid = getValueOrDefault( data, "start.callSid", null );
+                this.callSid = getValueOrDefault( data, "start.callSid", null ); // Optional
                 log.info(`Twilio: Call started, SID: ${this.callSid}`);
                 
                 // this.conferenceName = data.start?.customParameters?.conferenceName;
-                this.conferenceName = getValueOrDefault( data, "start.customParameters.conferenceName", "" );
+                this.conferenceName = getValueOrDefault( data, "start.customParameters.conferenceName", "" ); // Optional
                 log.info(`\tConference name: ${this.conferenceName}`);
                 break;
                 
@@ -499,11 +511,12 @@ class CallSession {
         
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
         
-        this.transcriptHistory[ track ].push( transcript );
+        const history = this.transcriptHistory[ track ];        
+        history.push( transcript );
         
-        let hit = this.transcriptHistory[ track ].findScamPhrases();
+        let hit = history.findScamPhrases();
         if( hit !== null ) {    
-            log.info("Scam phrase: " + JSON.stringify( hit, null, 2 ));
+            log.info("Scam phrase: " + JSON.stringify( hit, null, 2 )); 
             this._handleHangup("Scam phrase detected. Goodbye.");
         }
     }
@@ -537,21 +550,19 @@ class CallSession {
     _cleanup() {
         if (!this.active) return;
         
-        // Log final Deepgram stats before cleanup
-        if (this.metrics.deepgram.packetsSent.inbound > 0 || this.metrics.deepgram.packetsSent.outbound > 0) {
-            log.info(`Final Deepgram stats for call ${this.callSid || 'unknown'}:`);
-            this.logDeepgramStats();
+        if ( process.env.WANT_MONITORING ) {            
+            // Log final Deepgram stats before cleanup
+            if (this.metrics.deepgram.packetsSent.inbound > 0 || this.metrics.deepgram.packetsSent.outbound > 0) {
+                log.info(`Final Deepgram stats for call ${this.callSid || 'unknown'}:`);
+                this.logDeepgramStats();
+            }
         }
         
         this.active = false;
         this.hangupInitiated = false;
         this.isShuttingDown = true;
         
-        // Clear timers
-        if (this.statsTimer) {
-            clearInterval(this.statsTimer);
-            this.statsTimer = null;
-        }
+        this.stopStatsTimer();
         
         // Stop flush timers for both tracks
         this.stopFlushTimer('inbound');
