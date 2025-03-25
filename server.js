@@ -139,8 +139,7 @@ function getValueOrDefault( parsedDoc, path, defaultValue ) {
 
 // CallSession - Optimized version with Deepgram data tracking
 class CallSession {
-    constructor(webSocket, services) {
-        this.ws = webSocket;
+    constructor( services ) {
         this.services = services;
         this.callSid = null;
         this.conferenceName = "";
@@ -580,8 +579,6 @@ class CallSession {
             this.sttService.outbound = null;
         }
         
-        this.ws = null;
-        
         log.info(`Call session cleaned up, Call SID: ${this.callSid || "unknown"}, processed ${this.receivedPackets} packets`);
     }
 }
@@ -601,9 +598,9 @@ class VoiceServer {
         this.app = uWS.App().ws('/*', {
             /* Options */
             compression: uWS.SHARED_COMPRESSOR,
-            maxPayloadLength: 16 * 1024 * 1024,
+            maxPayloadLength: 32 * 1024,
             idleTimeout: 60,
-            maxBackpressure: 1024,
+            maxBackpressure: 1 * 1024 * 1024,
 
             /* Handlers */
             open: (ws, req) => {
@@ -612,7 +609,7 @@ class VoiceServer {
                 ws.sessionId = sessionId; // Store sessionId on the ws object!
                 log.info(`New WebSocket connection established from ${sessionId}`);
 
-                const session = new CallSession(ws, this.services);
+                const session = new CallSession( this.services );
                 this.sessions.set(sessionId, session);
             },
             message: (ws, message, isBinary) => {
