@@ -580,18 +580,7 @@ class CallSession {
             this.sttService.outbound = null;
         }
         
-        // Close WebSocket
-        if (this.ws) {
-            try {
-                // uWebSockets.js uses end() to close a connection
-                // 1000 is the normal closure code
-                // You can provide a reason string as the second parameter
-                this.ws.end(1000, "Session cleanup");
-            } catch (err) {
-                log.error("Error closing WebSocket", err);
-            }
-            this.ws = null;
-        }
+        this.ws = null;
         
         log.info(`Call session cleaned up, Call SID: ${this.callSid || "unknown"}, processed ${this.receivedPackets} packets`);
     }
