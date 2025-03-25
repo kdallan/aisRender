@@ -7,8 +7,8 @@ const TranscriptHistory = require( "./transcripthistory" );
 const { addParticipant, TwilioService } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
-const simdjson = require('simdjson');
-const { randomUUID } = require('crypto'); // Import randomUUID
+const simdjson = require('simdjson'); // Fast/lazy parsing
+const { randomUUID } = require('crypto'); // Import randomUUID for session ids
 
 require("dotenv").config();
 
@@ -114,7 +114,7 @@ const config = (() => {
             "wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none",
             sttConfig: {
                 model: process.env.DEEPGRAM_MODEL || "nova-3", // "nova-2-phonecall",
-                language: process.env.DEEPGRAM_LANGUAGE || "en",
+                language: process.env.DEEPGRAM_LANGUAGE || "en-US",
                 encoding: "mulaw",
                 sample_rate: 8000,
                 channels: 1,
@@ -145,16 +145,20 @@ class CallSession {
         this.conferenceName = "";
         this.active = true;
         this.hangupInitiated = false;
-        
-        // Cache the buffer to decode "base64" into        
-        this.decodeBuffer = Buffer.alloc( 32 * 1024 );
-        
-        // Counters and audio handling
         this.receivedPackets = 0;
         this.inboundPackets = 0;
         
         // SEPARATE TRACK PROCESSING - Create separate buffers for each track
-        this.audioAccumulator = { inbound: [], outbound: [] };
+        this.audioAccumulator = {
+            inbound: Buffer.alloc(this.MAX_BUFFER_SIZE),
+            outbound: Buffer.alloc(this.MAX_BUFFER_SIZE)
+        };
+        
+        this.audioAccumulatorOffset = {
+            inbound: 0,
+            outbound: 0
+        };
+                 
         this.audioAccumulatorSize = { inbound: 0, outbound: 0 };
         this.lastProcessingTime = { inbound: 0, outbound: 0 };
         this.processingStartTime = { inbound: 0, outbound: 0 };
@@ -173,7 +177,6 @@ class CallSession {
         this.MAX_CONSECUTIVE_ERRORS = 15;
         
         if ( process.env.WANT_MONITORING ) {            
-            // PERFORMANCE MONITORING - Enhanced with Deepgram data tracking
             this.metrics = {
                 processingTimes: { inbound: [], outbound: [] },
                 bufferGrowth: { inbound: [], outbound: [] },
@@ -189,17 +192,6 @@ class CallSession {
                 }
             };
         }
-        
-        // PREALLOC BUFFERS
-        this.audioAccumulator = {
-            inbound: Buffer.alloc(this.MAX_BUFFER_SIZE),
-            outbound: Buffer.alloc(this.MAX_BUFFER_SIZE)
-        };
-        
-        this.audioAccumulatorOffset = {
-            inbound: 0,
-            outbound: 0
-        };        
         
         this.transcriptHistory = {
             inbound: new TranscriptHistory( scamPhrases_1 ),
@@ -221,13 +213,10 @@ class CallSession {
         };
         
         if( process.env.WANT_MONITORING ) {
-            // Setup stats logging with enhanced metrics
             this.statsTimer = setInterval(() => {
                 if (this.receivedPackets > 0) {
-                    // Regular stats
                     log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}`);
                     
-                    // PERFORMANCE MONITORING - Log enhanced metrics
                     const now = performance.now();
                     const avgProcessingTimeInbound = this._calculateAverage(this.metrics.processingTimes.inbound);
                     const avgProcessingTimeOutbound = this._calculateAverage(this.metrics.processingTimes.outbound);
@@ -237,7 +226,6 @@ class CallSession {
               Outbound: buffer=${this.audioAccumulatorSize.outbound} bytes, avgProcessing=${avgProcessingTimeOutbound.toFixed(2)}ms, delay=${this.metrics.delays.outbound.toFixed(2)}ms`
                              );
                     
-                    // Log Deepgram stats
                     this.logDeepgramStats();
                     
                     // Reset metrics for next interval
@@ -246,22 +234,37 @@ class CallSession {
                     this.metrics.lastMetricTime = now;
                 }
             }, 30000);
+            
+            this.memoryMonitor = setInterval(() => {
+                const memoryUsage = process.memoryUsage();
+                
+                log.info(`Memory Usage:
+                    RSS: ${this._formatBytes(memoryUsage.rss)}
+                    Heap Total: ${this._formatBytes(memoryUsage.heapTotal)}
+                    Heap Used: ${this._formatBytes(memoryUsage.heapUsed)}
+                    External: ${this._formatBytes(memoryUsage.external)}
+                    Sessions: ${this.sessions.size}
+                    Active Timers: ${this._countActiveTimers()}`
+                );
+                
+                // Alert on potential memory leaks
+                if (memoryUsage.heapUsed > 1.5 * 1024 * 1024 * 1024) { // 1.5GB
+                    log.warn("Potential memory leak detected: Heap usage exceeding threshold");
+                }
+            }, 60000);            
         }
     }
     
-    // Helper for calculating averages
     _calculateAverage(array) {
         return array.length > 0 ? array.reduce((a, b) => a + b, 0) / array.length : 0;
     }
     
-    // Helper for formatting bytes
     _formatBytes(bytes) {
         if (bytes < 1024) return `${bytes} B`;
         if (bytes < 1048576) return `${(bytes / 1024).toFixed(2)} KB`;
         return `${(bytes / 1048576).toFixed(2)} MB`;
     }
     
-    // Log detailed Deepgram stats
     logDeepgramStats() {
         // Calculate average send rates
         const calcAvgRate = (rates) => rates.length > 0 
@@ -271,7 +274,6 @@ class CallSession {
         const inboundAvgRate = calcAvgRate(this.metrics.deepgram.sendRates.inbound);
         const outboundAvgRate = calcAvgRate(this.metrics.deepgram.sendRates.outbound);
         
-        // Log comprehensive Deepgram stats
         log.info(`Deepgram data transfer stats:
       Inbound: ${this._formatBytes(this.metrics.deepgram.bytesSent.inbound)} total (${this.metrics.deepgram.packetsSent.inbound} packets, avg ${inboundAvgRate.toFixed(2)} B/s)
       Outbound: ${this._formatBytes(this.metrics.deepgram.bytesSent.outbound)} total (${this.metrics.deepgram.packetsSent.outbound} packets, avg ${outboundAvgRate.toFixed(2)} B/s)
@@ -282,16 +284,21 @@ class CallSession {
         // Reset rate tracking (but keep totals)
         this.metrics.deepgram.sendRates = { inbound: [], outbound: [] };
     }
+    
+    stopMemoryMonitor() {
+        if (this.memoryMonitor) {
+            clearInterval(this.memoryMonitor);
+            this.memoryMonitor = null;
+        }
+    }
 
-	stopStatsTimer()
-	{    
+	stopStatsTimer() {    
         if (this.statsTimer) {
             clearInterval(this.statsTimer);
             this.statsTimer = null;
         }
     }
     
-    // IMPROVED TIMER LOGIC - Track-specific flush timer management
     stopFlushTimer(track) {
         if (this.flushTimer[track]) {
             clearTimeout(this.flushTimer[track]);
@@ -307,7 +314,7 @@ class CallSession {
             return;
         }
         
-        // IMPROVED TIMER LOGIC - Adaptive interval based on processing time
+        // Adaptive interval based on processing time
         const baseInterval = this.flushInterval[track];
         const processingTime = this.lastProcessingTime[track];
         let interval = baseInterval;
@@ -315,7 +322,7 @@ class CallSession {
         // If processing is taking longer, increase the interval
         const processingTakingLonger = processingTime > baseInterval;
         if ( processingTakingLonger ) {
-            interval = Math.min(processingTime * 1.5, 200); // Cap at 200ms
+            interval = Math.min(processingTime * 1.25, 100); // Cap at 100ms
         } else {
             interval = Math.max(baseInterval - 5, 10); // Try to catch up, but not too fast
         }
@@ -328,14 +335,12 @@ class CallSession {
         	}
         }           
         
-        // Schedule the timer
         this.flushTimer[track] = setTimeout(() => {
             this.flushAudioBuffer(track);
         }, interval);
     }
     
     accumulateAudio(buffer, track) {
-        // Cache frequently accessed values.
         const bufLen = buffer.length;
         let offset = this.audioAccumulatorOffset[track];
         const maxSize = this.MAX_BUFFER_SIZE;
@@ -359,7 +364,6 @@ class CallSession {
         this.audioAccumulatorOffset[track] = offset;
         
         if ( process.env.WANT_MONITORING ) {            
-	        // Record buffer growth.
 	        growthMetric.push(bufLen);
         }   
         
@@ -367,9 +371,9 @@ class CallSession {
         const pTime = this.lastProcessingTime[track];
         if (pTime > 0) {
             if (pTime < 10) {
-                this.bufferSizeThreshold[track] = Math.max(1024, this.bufferSizeThreshold[track] - 128);
+                this.bufferSizeThreshold[track] = Math.max(512, this.bufferSizeThreshold[track] - 128);
             } else if (pTime > 50) {
-                this.bufferSizeThreshold[track] = Math.min(8 * 1024, this.bufferSizeThreshold[track] + 256);
+                this.bufferSizeThreshold[track] = Math.min(6 * 1024, this.bufferSizeThreshold[track] + 256);
             }
         }
         
@@ -379,14 +383,12 @@ class CallSession {
             return;
         }
         
-        // If no flush timer is active, start one.
         if (!this.flushTimer[track]) {
             this.startFlushTimer(track);
         }
     }
     
     flushAudioBuffer(track) {
-        // Immediately stop any running flush timer.
         this.stopFlushTimer(track);
         
         const offset = this.audioAccumulatorOffset[track];
@@ -395,7 +397,6 @@ class CallSession {
          	return;   
         }
         	
-        // Cache frequently used variables locally.
         const accumulator = this.audioAccumulator[track];
         const combinedBuffer = accumulator.slice(0, offset);
         const bufferSize = combinedBuffer.length;
@@ -464,7 +465,6 @@ class CallSession {
         this.startFlushTimer(track);
     }
     
-    // Message handling (uWebSockets.js Version)
     handleMessage(message, isBinary) {
         if (!this.active) return;
 
@@ -485,11 +485,7 @@ class CallSession {
 
                     if (track === "inbound" || track === "outbound") {
                         this.inboundPackets++;
-
-                        // Decode base64 payload.
-                        const bytesWritten = this.decodeBuffer.write( payload, 0, "base64" );
-                        const audioBuffer = this.decodeBuffer.slice( 0, bytesWritten );
-                        this.accumulateAudio(audioBuffer, track);
+                        this.accumulateAudio( Buffer.from( payload, 'base64' ), track);
                     }
                     break;
 
@@ -548,6 +544,13 @@ class CallSession {
         }
     }
     
+    _clearAllTimers() {
+		stopMemoryMonitor();
+		stopStatsTimer();
+  		stopFlushTimer( 'inbound' );
+    	stopFlushTimer( 'outbound' );
+    }    
+    
     _cleanup() {
         if (!this.active) return;
         
@@ -557,16 +560,13 @@ class CallSession {
                 log.info(`Final Deepgram stats for call ${this.callSid || 'unknown'}:`);
                 this.logDeepgramStats();
             }
-            
-        	this.stopStatsTimer();            
         }
         
         this.active = false;
         this.hangupInitiated = false;
         this.isShuttingDown = true;
         
-        this.stopFlushTimer('inbound');
-        this.stopFlushTimer('outbound');
+        _clearAllTimers();
         
         if (this.sttService && this.sttService.inbound) {
             this.sttService.inbound.cleanup();
@@ -593,7 +593,7 @@ class VoiceServer {
         this.sessions = new Map();
         this.isShuttingDown = false;
         this.listenSocket = null; // Keep track of the listen socket for closing.
-
+        
         this.app = uWS.App().ws('/*', {
             /* Options */
             compression: uWS.DISABLED,
@@ -622,7 +622,6 @@ class VoiceServer {
             },
             drain: (ws) => {
                 log.warn(`WebSocket backpressure: ${ws.sessionId}, bufferedAmount: ${ws.getBufferedAmount()}`);
-                // You might want to add pause/resume logic in CallSession.
             },
             close: (ws, code, message) => {
                 const session = this.sessions.get(ws.sessionId);
@@ -685,21 +684,7 @@ const gracefulShutdown = (signal) => {
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("uncaughtException", (error) => {
-    log.error("Uncaught exception", error);
-    
-    // Close all active WebSockets with an error code
-    if (server && server.sessions) {
-        for (const session of server.sessions.values()) {
-            if (session.ws) {
-                try {
-                    session.ws.end(1011, "Server encountered a critical error");
-                } catch (err) {
-                    // Log but continue closing others
-                }
-            }
-        }
-    }
-    
+    log.error("Uncaught exception", error);    
     if (server) server.stop();
     process.exit(1);
 });
