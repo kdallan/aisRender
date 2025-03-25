@@ -234,24 +234,6 @@ class CallSession {
                     this.metrics.lastMetricTime = now;
                 }
             }, 30000);
-            
-            this.memoryMonitor = setInterval(() => {
-                const memoryUsage = process.memoryUsage();
-                
-                log.info(`Memory Usage:
-                    RSS: ${this._formatBytes(memoryUsage.rss)}
-                    Heap Total: ${this._formatBytes(memoryUsage.heapTotal)}
-                    Heap Used: ${this._formatBytes(memoryUsage.heapUsed)}
-                    External: ${this._formatBytes(memoryUsage.external)}
-                    Sessions: ${this.sessions.size}
-                    Active Timers: ${this._countActiveTimers()}`
-                );
-                
-                // Alert on potential memory leaks
-                if (memoryUsage.heapUsed > 1.5 * 1024 * 1024 * 1024) { // 1.5GB
-                    log.warn("Potential memory leak detected: Heap usage exceeding threshold");
-                }
-            }, 60000);            
         }
     }
     
@@ -593,6 +575,25 @@ class VoiceServer {
         this.sessions = new Map();
         this.isShuttingDown = false;
         this.listenSocket = null; // Keep track of the listen socket for closing.
+        
+        if ( process.env.WANT_MONITORING ) {                    
+            this.memoryMonitor = setInterval(() => {
+                const memoryUsage = process.memoryUsage();
+                
+                log.info(`Memory Usage:
+                    RSS: ${this._formatBytes(memoryUsage.rss)}
+                    Heap Total: ${this._formatBytes(memoryUsage.heapTotal)}
+                    Heap Used: ${this._formatBytes(memoryUsage.heapUsed)}
+                    External: ${this._formatBytes(memoryUsage.external)}
+                    Sessions: ${this.sessions?.size}`
+                );
+                
+                // Alert on potential memory leaks
+                if (memoryUsage.heapUsed > 1.5 * 1024 * 1024 * 1024) { // 1.5GB
+                    log.warn("Potential memory leak detected: Heap usage exceeding threshold");
+                }
+            }, 60000);
+        }
         
         this.app = uWS.App().ws('/*', {
             /* Options */
