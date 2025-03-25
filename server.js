@@ -147,7 +147,7 @@ class CallSession {
         this.hangupInitiated = false;
         
         // Cache the buffer to decode "base64" into        
-        this.decodeBuffer = Buffer.alloc( 4 * 1024 );
+        this.decodeBuffer = Buffer.alloc( 32 * 1024 );
         
         // Counters and audio handling
         this.receivedPackets = 0;
@@ -428,7 +428,7 @@ class CallSession {
                 
             } else {
                 log.warn(`STT service not connected for ${track} track, buffered ${offset} bytes`);
-                if (bufferSize > 64 * 1024) {
+                if (bufferSize > 32 * 1024) {
                     this.consecutiveErrors[track]++;
                 }
             }
@@ -520,14 +520,14 @@ class CallSession {
         
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
         
-//        const history = this.transcriptHistory[ track ];
-//        history.push( transcript );
-//        
-//        let hit = history.findScamPhrases();
-//        if( hit !== null ) {    
-//            log.info("Scam phrase: " + JSON.stringify( hit, null, 2 )); 
-//            this._handleHangup("Scam phrase detected. Goodbye.");
-//        }
+        const history = this.transcriptHistory[ track ];
+        history.push( transcript );
+        
+        let hit = history.findScamPhrases();
+        if( hit !== null ) {    
+            log.info("Scam phrase: " + JSON.stringify( hit, null, 2 )); 
+            this._handleHangup("Scam phrase detected. Goodbye.");
+        }
     }
     
     _handleUtteranceEnd(utterance, track) {
@@ -597,7 +597,7 @@ class VoiceServer {
         this.app = uWS.App().ws('/*', {
             /* Options */
             compression: uWS.DISABLED,
-            maxPayloadLength: 64 * 1024,
+            maxPayloadLength: 32 * 1024,
             idleTimeout: 120,
             maxBackpressure: 1 * 1024 * 1024,
 
