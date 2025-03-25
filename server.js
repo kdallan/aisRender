@@ -471,14 +471,12 @@ class CallSession {
         let data;
         try {
              // uWS always gives ArrayBuffer.  Need to convert to string.
-            const messageString = Buffer.from(message).toString('utf8');
-            data = simdjson.lazyParse(messageString);
+            data = simdjson.lazyParse(message.toString('utf8'));
 
             let event = data.valueForKeyPath("event");
 
             switch (event) {
                 case "media":
-                  this.decodeBuffer
                     this.receivedPackets++;
 
                     let payload = data.valueForKeyPath("media.payload"); // Not optional
@@ -487,7 +485,7 @@ class CallSession {
                     if (track === "inbound" || track === "outbound") {
                         this.inboundPackets++;
 
-                        // Decode base64 payload.
+                        // Decode base64 payload using the preallocated buffer
                         const bytesWritten = this.decodeBuffer.write( payload, 0, "base64" );
                         const audioBuffer = this.decodeBuffer.slice( 0, bytesWritten );
                         this.accumulateAudio(audioBuffer, track);
@@ -521,14 +519,14 @@ class CallSession {
         
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
         
-        const history = this.transcriptHistory[ track ];
-        history.push( transcript );
-        
-        let hit = history.findScamPhrases();
-        if( hit !== null ) {    
-            log.info("Scam phrase: " + JSON.stringify( hit, null, 2 )); 
-            this._handleHangup("Scam phrase detected. Goodbye.");
-        }
+//        const history = this.transcriptHistory[ track ];
+//        history.push( transcript );
+//        
+//        let hit = history.findScamPhrases();
+//        if( hit !== null ) {    
+//            log.info("Scam phrase: " + JSON.stringify( hit, null, 2 )); 
+//            this._handleHangup("Scam phrase detected. Goodbye.");
+//        }
     }
     
     _handleUtteranceEnd(utterance, track) {
@@ -597,9 +595,9 @@ class VoiceServer {
 
         this.app = uWS.App().ws('/*', {
             /* Options */
-            compression: uWS.SHARED_COMPRESSOR,
-            maxPayloadLength: 32 * 1024,
-            idleTimeout: 60,
+            compression: uWS.DISABLED,
+            maxPayloadLength: 64 * 1024,
+            idleTimeout: 120,
             maxBackpressure: 1 * 1024 * 1024,
 
             /* Handlers */
