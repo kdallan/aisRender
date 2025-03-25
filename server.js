@@ -139,6 +139,10 @@ class CallSession {
         this.hangupInitiated = false;
         this.hasSeenMedia = false;
         
+        // Cahed, fast JSON parser
+        
+        this.jsonParser = new simdjson();
+        
         // Counters and audio handling
         this.receivedPackets = 0;
         this.inboundPackets = 0;
@@ -425,7 +429,6 @@ class CallSession {
         }
     }
     
-    
     // Message handling
     _handleMessage(message) {
         if (!this.active) return;
@@ -440,7 +443,7 @@ class CallSession {
             // If we don't have a valid JSON string, exit early.
             if (jsonStr === null) return;
 
-            const data = simdjson.parse(jsonStr);
+            const data = jsonParser.parse(jsonStr);
             
             // Process by event type
             switch (data.event) {
