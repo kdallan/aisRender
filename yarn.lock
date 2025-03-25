@@ -11,6 +11,8 @@
 
 "@deepgram/sdk@^3.11.2":
   version "3.11.2"
+  resolved "https://registry.yarnpkg.com/@deepgram/sdk/-/sdk-3.11.2.tgz#c5e95e27e324b9912cd780f65a6d57f802572f44"
+  integrity sha512-sx/2B0vG18YJ9c807U6ZojliURZvPS0jFnwyMmzwfK5nELp3vvYrmAcoI2nRjndzYrkFe3YUg5T/dFLtI5l2Wg==
   dependencies:
     "@deepgram/captions" "^1.1.1"
     "@types/node" "^18.19.39"
@@ -106,6 +108,8 @@ delayed-stream@~1.0.0:
 
 dotenv@^16.4.7:
   version "16.4.7"
+  resolved "https://registry.yarnpkg.com/dotenv/-/dotenv-16.4.7.tgz#0e20c5b82950140aa99be360a8a5f52335f53c26"
+  integrity sha512-47qPchRCykZC03FhkYAhrvwU4xDBFIj1QPqaarj6mdM/hgUzfPHcpkHJOn3mJAufFeeAxAzeGsr5X0M4k6fLZQ==
 
 dunder-proto@^1.0.1:
   version "1.0.1"
@@ -154,6 +158,11 @@ events@^3.3.0:
   version "3.3.0"
   resolved "https://registry.npmjs.org/events/-/events-3.3.0.tgz"
   integrity sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q==
+
+fast-json-parse@^1.0.3:
+  version "1.0.3"
+  resolved "https://registry.npmjs.org/fast-json-parse/-/fast-json-parse-1.0.3.tgz"
+  integrity sha512-FRWsaZRWEJ1ESVNbDWmsAlqDk96gPQezzLghafp5J4GUKjbCz3OkAHuZs5TuPEtkbVQERysLp9xv6c24fBm8Aw==
 
 follow-redirects@^1.15.6:
   version "1.15.9"
@@ -407,6 +416,8 @@ tr46@~0.0.3:
 
 twilio@^5.5.1:
   version "5.5.1"
+  resolved "https://registry.yarnpkg.com/twilio/-/twilio-5.5.1.tgz#b2d62bb94e9c79843a4f5a36164f3b173bf0188c"
+  integrity sha512-b1gLd2eMsCSCHRerp3GQUedVlz0nCTt5FbyPxDPmMvk5cm6eIPk4ZTp5JNpgucARZgpCB2uUACJbdcidEHAUBA==
   dependencies:
     axios "^1.7.8"
     dayjs "^1.11.9"

@@ -5,6 +5,9 @@ const WebSocket = require( "ws" );
 const TranscriptHistory = require( "./transcripthistory" );
 const { addParticipant, TwilioService } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
+const { performance } = require('perf_hooks');
+const FastJsonParse = require('fast-json-parse');
+
 
 require("dotenv").config();
 
@@ -116,7 +119,7 @@ const config = (() => {
                 channels: 1,
                 no_delay: true,
                 interim_results: true,
-                endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 5,
+                endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 4,
                 utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
             },
             throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 20
@@ -164,14 +167,14 @@ class CallSession {
         this.metrics = {
             processingTimes: { inbound: [], outbound: [] },
             bufferGrowth: { inbound: [], outbound: [] },
-            lastMetricTime: Date.now(),
+            lastMetricTime: performance.now(),
             delays: { inbound: 0, outbound: 0 },
             // Add Deepgram data tracking
             deepgram: {
                 bytesSent: { inbound: 0, outbound: 0 },
                 packetsSent: { inbound: 0, outbound: 0 },
                 sendRates: { inbound: [], outbound: [] },
-                lastSendTime: { inbound: Date.now(), outbound: Date.now() },
+                lastSendTime: { inbound: performance.now(), outbound: performance.now() },
                 responseTimes: { inbound: [], outbound: [] }
             }
         };
@@ -195,15 +198,15 @@ class CallSession {
         // Initialize STT services - one for each track
         this.sttService = {
             inbound: new DeepgramSTTService(
-                                            this.services.config.deepgram,
-                                            (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'inbound'),
-                                            (utterance) => this._handleUtteranceEnd(utterance, 'inbound')
-                                            ),
+                this.services.config.deepgram,
+                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'inbound'),
+                (utterance) => this._handleUtteranceEnd(utterance, 'inbound')
+            ),
             outbound: new DeepgramSTTService(
-                                             this.services.config.deepgram,
-                                             (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'outbound'),
-                                             (utterance) => this._handleUtteranceEnd(utterance, 'outbound')
-                                             )
+                 this.services.config.deepgram,
+                 (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'outbound'),
+                 (utterance) => this._handleUtteranceEnd(utterance, 'outbound')
+            )
         };
         
         // Setup WebSocket handlers
@@ -218,7 +221,7 @@ class CallSession {
                 log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}`);
                 
                 // 5. PERFORMANCE MONITORING - Log enhanced metrics
-                const now = Date.now();
+                const now = performance.now();
                 const avgProcessingTimeInbound = this._calculateAverage(this.metrics.processingTimes.inbound);
                 const avgProcessingTimeOutbound = this._calculateAverage(this.metrics.processingTimes.outbound);
                 
@@ -235,7 +238,7 @@ class CallSession {
                 this.metrics.bufferGrowth = { inbound: [], outbound: [] };
                 this.metrics.lastMetricTime = now;
             }
-        }, 10000);
+        }, 30000);
         
         log.info("New call session created with optimized processing and data tracking");
     }
@@ -361,7 +364,7 @@ class CallSession {
             const bufferSize = combinedBuffer.length;
             const sttService = this.sttService[track];
             const deepgramMetrics = this.metrics.deepgram;
-            const currentTime = Date.now();
+            const currentTime = performance.now();
             
             // Record processing start time.
             this.processingStartTime[track] = currentTime;
@@ -397,7 +400,7 @@ class CallSession {
                 // Reset the offset to 0 – no need to create a new Buffer.
                 this.audioAccumulatorOffset[track] = 0;
                 
-                const processingTime = Date.now() - this.processingStartTime[track];
+                const processingTime = performance.now() - this.processingStartTime[track];
                 this.lastProcessingTime[track] = processingTime;
                 this.metrics.processingTimes[track].push(processingTime);
                 this.metrics.deepgram.responseTimes[track].push(processingTime);
@@ -408,10 +411,10 @@ class CallSession {
                 if (sttService) {
                     sttService.cleanup();
                     this.sttService[track] = new DeepgramSTTService(
-                                                                    this.services.config.deepgram,
-                                                                    (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
-                                                                    (utterance) => this._handleUtteranceEnd(utterance, track)
-                                                                    );
+                        this.services.config.deepgram,
+                        (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
+                        (utterance) => this._handleUtteranceEnd(utterance, track)
+                    );
                 }
                 this.consecutiveErrors[track] = 0;
             }
@@ -431,9 +434,9 @@ class CallSession {
         try {
             // Parse message into JSON
             if (Buffer.isBuffer(message)) {
-                data = JSON.parse(message.toString("utf8"));
+                data = FastJsonParse(message.toString("utf8"));
             } else if (typeof message === "string") {
-                data = JSON.parse(message);
+                data = FastJsonParse(message);
             } else {
                 return;
             }
