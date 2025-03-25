@@ -137,6 +137,16 @@ function getValueOrDefault( parsedDoc, path, defaultValue ) {
     }
 }
 
+function calculateAverage(array) {
+    return array.length > 0 ? array.reduce((a, b) => a + b, 0) / array.length : 0;
+}
+
+function formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(2)} KB`;
+    return `${(bytes / 1048576).toFixed(2)} MB`;
+}
+
 // CallSession - Optimized version with Deepgram data tracking
 class CallSession {
     constructor( services ) {
@@ -218,8 +228,8 @@ class CallSession {
                     log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}`);
                     
                     const now = performance.now();
-                    const avgProcessingTimeInbound = this._calculateAverage(this.metrics.processingTimes.inbound);
-                    const avgProcessingTimeOutbound = this._calculateAverage(this.metrics.processingTimes.outbound);
+                    const avgProcessingTimeInbound = calculateAverage(this.metrics.processingTimes.inbound);
+                    const avgProcessingTimeOutbound = calculateAverage(this.metrics.processingTimes.outbound);
                     
                     log.info(`Performance metrics: 
               Inbound: buffer=${this.audioAccumulatorSize.inbound} bytes, avgProcessing=${avgProcessingTimeInbound.toFixed(2)}ms, delay=${this.metrics.delays.inbound.toFixed(2)}ms
@@ -237,16 +247,6 @@ class CallSession {
         }
     }
     
-    _calculateAverage(array) {
-        return array.length > 0 ? array.reduce((a, b) => a + b, 0) / array.length : 0;
-    }
-    
-    _formatBytes(bytes) {
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1048576) return `${(bytes / 1024).toFixed(2)} KB`;
-        return `${(bytes / 1048576).toFixed(2)} MB`;
-    }
-    
     logDeepgramStats() {
         // Calculate average send rates
         const calcAvgRate = (rates) => rates.length > 0 
@@ -257,10 +257,10 @@ class CallSession {
         const outboundAvgRate = calcAvgRate(this.metrics.deepgram.sendRates.outbound);
         
         log.info(`Deepgram data transfer stats:
-      Inbound: ${this._formatBytes(this.metrics.deepgram.bytesSent.inbound)} total (${this.metrics.deepgram.packetsSent.inbound} packets, avg ${inboundAvgRate.toFixed(2)} B/s)
-      Outbound: ${this._formatBytes(this.metrics.deepgram.bytesSent.outbound)} total (${this.metrics.deepgram.packetsSent.outbound} packets, avg ${outboundAvgRate.toFixed(2)} B/s)
-      Current rate (inbound): ${this._formatBytes(inboundAvgRate)} per second
-      Current rate (outbound): ${this._formatBytes(outboundAvgRate)} per second
+      Inbound: ${formatBytes(this.metrics.deepgram.bytesSent.inbound)} total (${this.metrics.deepgram.packetsSent.inbound} packets, avg ${inboundAvgRate.toFixed(2)} B/s)
+      Outbound: ${formatBytes(this.metrics.deepgram.bytesSent.outbound)} total (${this.metrics.deepgram.packetsSent.outbound} packets, avg ${outboundAvgRate.toFixed(2)} B/s)
+      Current rate (inbound): ${formatBytes(inboundAvgRate)} per second
+      Current rate (outbound): ${formatBytes(outboundAvgRate)} per second
     `);
         
         // Reset rate tracking (but keep totals)
@@ -581,10 +581,10 @@ class VoiceServer {
                 const memoryUsage = process.memoryUsage();
                 
                 log.info(`Memory Usage:
-                    RSS: ${this._formatBytes(memoryUsage.rss)}
-                    Heap Total: ${this._formatBytes(memoryUsage.heapTotal)}
-                    Heap Used: ${this._formatBytes(memoryUsage.heapUsed)}
-                    External: ${this._formatBytes(memoryUsage.external)}
+                    RSS: ${formatBytes(memoryUsage.rss)}
+                    Heap Total: ${formatBytes(memoryUsage.heapTotal)}
+                    Heap Used: ${formatBytes(memoryUsage.heapUsed)}
+                    External: ${formatBytes(memoryUsage.external)}
                     Sessions: ${this.sessions?.size}`
                 );
                 
