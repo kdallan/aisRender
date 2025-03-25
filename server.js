@@ -302,34 +302,39 @@ class CallSession {
     flushAudioBuffer(track) {
         this.stopFlushTimer(track);
         
-        if (this.audioAccumulatorSize[track] > 0) {
+        const totalBytes = this.audioAccumulatorSize[track];
+        
+        if ( totalBytes > 0) {
+      		// Cache properties locally to minimize repeated lookups
+      		const buffers = this.audioAccumulator[track];
+      		const sttService = this.sttService[track];
+      		const deepgramMetrics = this.metrics.deepgram;
+      		const currentTime = Date.now();
+        
             // 5. PERFORMANCE MONITORING - Record start time
-            this.processingStartTime[track] = Date.now();
+			this.processingStartTime[track] = currentTime;                        
             
-            const combinedBuffer = Buffer.concat(this.audioAccumulator[track]);
+            const combinedBuffer = Buffer.concat(buffers);
             const bufferSize = combinedBuffer.length;
             
             try {
-                if (this.sttService[track]?.connected) {
-                    log.debug(`Flushing ${track} track: ${this.audioAccumulator[track].length} buffers, size: ${bufferSize} bytes`);
-                    
+                if (sttService && sttService.connected) {
                     // Track bytes before sending
-                    const now = Date.now();
-                    const timeSinceLastSend = now - this.metrics.deepgram.lastSendTime[track];
+                    const timeSinceLastSend = currentTime - deepgramMetrics.lastSendTime[track];
                     
                     // Send data to Deepgram
-                    this.sttService[track].send(combinedBuffer);
+                    sttService.send(combinedBuffer);
                     
                     // Update Deepgram metrics
-                    this.metrics.deepgram.bytesSent[track] += bufferSize;
-                    this.metrics.deepgram.packetsSent[track]++;
+                    deepgramMetrics.bytesSent[track] += bufferSize;
+                    deepgramMetrics.packetsSent[track]++;
                     
                     // Calculate send rate in bytes per second
                     if (timeSinceLastSend > 0) {
                         const sendRate = bufferSize / (timeSinceLastSend / 1000);
-                        this.metrics.deepgram.sendRates[track].push(sendRate);
+                        deepgramMetrics.sendRates[track].push(sendRate);
                     }
-                    this.metrics.deepgram.lastSendTime[track] = now;
+                    deepgramMetrics.lastSendTime[track] = currentTime;
                     
                     // 4. ERROR RESILIENCE - Reset error counter on success
                     this.consecutiveErrors[track] = 0;
@@ -361,14 +366,14 @@ class CallSession {
             if (this.consecutiveErrors[track] >= this.MAX_CONSECUTIVE_ERRORS) {
                 log.error(`Circuit breaker triggered for ${track} track after ${this.consecutiveErrors[track]} errors`);
                 // Attempt to reconnect the STT service
-                if (this.sttService[track]) {
-                    this.sttService[track].cleanup();
+                if (sttService) {
+                    sttService.cleanup();
                     this.sttService[track] = new DeepgramSTTService(
-                                                                    this.services.config.deepgram,
-                                                                    (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
-                                                                    (utterance) => this._handleUtteranceEnd(utterance, track)
-                                                                    );
-                }
+                        this.services.config.deepgram,
+                        (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
+                        (utterance) => this._handleUtteranceEnd(utterance, track)
+                    );
+				}
                 this.consecutiveErrors[track] = 0;
             }
         }
@@ -382,6 +387,8 @@ class CallSession {
     accumulateAudio(buffer, track) {
         this.audioAccumulator[track].push(buffer);
         this.audioAccumulatorSize[track] += buffer.length;
+        
+        const accumBytes = this.audioAccumulatorSize[track];
         
         // 5. PERFORMANCE MONITORING - Track buffer growth
         this.metrics.bufferGrowth[track].push(buffer.length);
@@ -400,15 +407,18 @@ class CallSession {
         }
         
         // 4. ERROR RESILIENCE - Enforce maximum buffer size
-        if (this.audioAccumulatorSize[track] >= this.MAX_BUFFER_SIZE) {
+        if (accumBytes >= this.MAX_BUFFER_SIZE) {
             log.warn(`${track} buffer exceeded maximum size (${this.MAX_BUFFER_SIZE} bytes), flushing immediately`);
             this.flushAudioBuffer(track);
             return;
         }
         
-        if (this.audioAccumulatorSize[track] >= this.bufferSizeThreshold[track]) {
+        if (accumBytes] >= this.bufferSizeThreshold[track]) {
             this.flushAudioBuffer(track);
-        } else if (!this.flushTimer[track]) {
+            return;
+        }
+        
+        if (!this.flushTimer[track]) {
             this.startFlushTimer(track);
         }
     }
