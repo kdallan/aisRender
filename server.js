@@ -566,7 +566,7 @@ class CallSession {
         this.hangupInitiated = false;
         this.isShuttingDown = true;
         
-        _clearAllTimers();
+        this._clearAllTimers();
         
         if (this.sttService && this.sttService.inbound) {
             this.sttService.inbound.cleanup();
