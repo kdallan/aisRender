@@ -657,7 +657,7 @@ class VoiceServer {
                 res.writeStatus('404 Not Found'); // Use writeStatus
                 res.end("Not Found");
             }
-        }).listen(config.server.port, (listenSocket) => {
+        }).listen( "0.0.0.0", config.server.port, (listenSocket) => {
             if (listenSocket) {
                 this.listenSocket = listenSocket; // Store the listen socket.
                 log.info(`Server listening on port ${config.server.port}`);
