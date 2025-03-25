@@ -147,6 +147,7 @@ class CallSession {
         this.hangupInitiated = false;
         this.receivedPackets = 0;
         this.inboundPackets = 0;
+        this.MAX_BUFFER_SIZE = 32 * 1024;        
         
         // SEPARATE TRACK PROCESSING - Create separate buffers for each track
         this.audioAccumulator = {
@@ -172,7 +173,6 @@ class CallSession {
         };
         
         // ERROR RESILIENCE - Add maximum sizes and circuit breaker
-        this.MAX_BUFFER_SIZE = 32 * 1024;
         this.consecutiveErrors = { inbound: 0, outbound: 0 };
         this.MAX_CONSECUTIVE_ERRORS = 15;
         
