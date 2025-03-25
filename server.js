@@ -6,7 +6,7 @@ const TranscriptHistory = require( "./transcripthistory" );
 const { addParticipant, TwilioService } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
-
+const simdjson = require('simdjson');
 
 require("dotenv").config();
 
@@ -440,7 +440,7 @@ class CallSession {
             // If we don't have a valid JSON string, exit early.
             if (jsonStr === null) return;
 
-            const data = JSON.parse(jsonStr);
+            const data = simdjson.parse(jsonStr);
             
             // Process by event type
             switch (data.event) {
