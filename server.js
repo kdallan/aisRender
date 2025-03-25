@@ -1,12 +1,14 @@
 // Import required modules
 const http = require( "http" );
 const https = require( "https" );
-const WebSocket = require( "ws" );
+const uWS = require('uWebSockets.js');
+const us_listen_socket_close = uWS.us_listen_socket_close;
 const TranscriptHistory = require( "./transcripthistory" );
 const { addParticipant, TwilioService } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
 const simdjson = require('simdjson');
+const { randomUUID } = require('crypto'); // Import randomUUID
 
 require("dotenv").config();
 
@@ -218,11 +220,6 @@ class CallSession {
                                              (utterance) => this._handleUtteranceEnd(utterance, 'outbound')
                                              )
         };
-        
-        // Setup WebSocket handlers
-        this.ws.on("message", this._handleMessage.bind(this));
-        this.ws.on("close", this._handleClose.bind(this));
-        this.ws.on("error", (error) => log.error("WebSocket error:", error));
         
         if( process.env.WANT_MONITORING ) {
             // Setup stats logging with enhanced metrics
@@ -468,63 +465,54 @@ class CallSession {
         this.startFlushTimer(track);
     }
     
-    // Message handling
-    _handleMessage(message) {
+    // Message handling (uWebSockets.js Version)
+    handleMessage(message, isBinary) {
         if (!this.active) return;
-        
-        let data;
-        try {        
-            // Lazy parse message into JSON - big win on speed using lazyParse
-            if (Buffer.isBuffer(message)) {
-                data = simdjson.lazyParse( message.toString("utf8") );
-            } else if (typeof message === "string") {
-                data = simdjson.lazyParse( message );
-            } else {
-                return;
-            }        
-            
-            let event = data.valueForKeyPath( "event" );
-            
-            // Process by event type
-            switch (event) {
-            case "media":
-            	let buf = this.decodeBuffer;
-                this.receivedPackets++;
-                
-                let payload = data.valueForKeyPath( "media.payload" ); // Not optional
-                let track = data.valueForKeyPath( "media.track" ); // Not optional
-                
-                if (track === "inbound" || track === "outbound") {
-                    this.inboundPackets++;
 
-					// Cached buffer to reduce memory allocation                    
-                    const bytesWritten = buf.write( payload, 0, "base64" );
-                    const audioBuffer = buf.slice( 0, bytesWritten );
-                    this.accumulateAudio( audioBuffer, track );
-                }
-                break;
-            
-            case "connected":
-                log.info( "Twilio: Connected event received" );
-                break;
-                
-            case "start":
-        		// this.callSid = data.start?.callSid || data.callSid;
-                this.callSid = getValueOrDefault( data, "start.callSid", null ); // Optional
-                log.info( `Twilio: Call started, SID: ${this.callSid}` );
-                
-                // this.conferenceName = data.start?.customParameters?.conferenceName;
-                this.conferenceName = getValueOrDefault( data, "start.customParameters.conferenceName", "" ); // Optional
-                log.info( `\tConference name: ${this.conferenceName}` );
-                break;
-                
-            case "close":
-                log.info( "Twilio: Close event received" );
-                this._cleanup();
-                break;
+        let data;
+        try {
+             // uWS always gives ArrayBuffer.  Need to convert to string.
+            const messageString = Buffer.from(message).toString('utf8');
+            data = simdjson.lazyParse(messageString);
+
+            let event = data.valueForKeyPath("event");
+
+            switch (event) {
+                case "media":
+                  this.decodeBuffer
+                    this.receivedPackets++;
+
+                    let payload = data.valueForKeyPath("media.payload"); // Not optional
+                    let track = data.valueForKeyPath("media.track"); // Not optional
+
+                    if (track === "inbound" || track === "outbound") {
+                        this.inboundPackets++;
+
+                        // Decode base64 payload.
+                        const bytesWritten = this.decodeBuffer.write( payload, 0, "base64" );
+                        const audioBuffer = this.decodeBuffer.slice( 0, bytesWritten );
+                        this.accumulateAudio(audioBuffer, track);
+                    }
+                    break;
+
+                case "connected":
+                    log.info("Twilio: Connected event received");
+                    break;
+
+                case "start":
+                    this.callSid = getValueOrDefault(data, "start.callSid", null); // Optional
+                    log.info(`Twilio: Call started, SID: ${this.callSid}`);
+                    this.conferenceName = getValueOrDefault(data, "start.customParameters.conferenceName", ""); // Optional
+                    log.info(`\tConference name: ${this.conferenceName}`);
+                    break;
+
+                case "close":
+                    log.info("Twilio: Close event received");
+                    this._cleanup();
+                    break;
             }
         } catch (error) {
-            log.error( "Error processing message", error );
+            log.error("Error processing message", error);
         }
     }
     
@@ -562,11 +550,6 @@ class CallSession {
         }
     }
     
-    _handleClose() {
-        log.info("Twilio: Connection closed");
-        this._cleanup();
-    }
-    
     _cleanup() {
         if (!this.active) return;
         
@@ -600,12 +583,12 @@ class CallSession {
         // Close WebSocket
         if (this.ws) {
             try {
-                if (this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.terminate();
-                }
-                this.ws.removeAllListeners();
+                // uWebSockets.js uses end() to close a connection
+                // 1000 is the normal closure code
+                // You can provide a reason string as the second parameter
+                this.ws.end(1000, "Session cleanup");
             } catch (err) {
-                log.error("Error terminating WebSocket", err);
+                log.error("Error closing WebSocket", err);
             }
             this.ws = null;
         }
@@ -614,72 +597,96 @@ class CallSession {
     }
 }
 
-// VoiceServer
+// VoiceServer (uWebSockets.js Version)
 class VoiceServer {
     constructor() {
         this.services = {
             config,
             twilioService: new TwilioService(config.twilio)
         };
-        
-        this.httpServer = http.createServer((req, res) => {
-            // Use the WHATWG URL API, passing a base URL based on the request
-            const parsedUrl = new URL(req.url, `http://${req.headers.host}`);
-            if (parsedUrl.pathname === "/") {
-                res.writeHead(200, { "Content-Type": "text/plain" });
-                res.end("aiShield Monitor");
-            } else {
-                res.writeHead(404, { "Content-Type": "text/plain" });
-                res.end("Not Found");
-            }
-        });
-        
-        this.wsServer = new WebSocket.Server({ server: this.httpServer });
+
         this.sessions = new Map();
         this.isShuttingDown = false;
-        
-        this.wsServer.on("connection", (ws, req) => {
-            const sessionId = `${req.socket.remoteAddress}:${req.socket.remotePort}`;
-            log.info(`New WebSocket connection established from ${sessionId}`);
-            
-            const session = new CallSession(ws, this.services);
-            this.sessions.set(sessionId, session);
-            
-            ws.on("close", () => {
-                this.sessions.delete(sessionId);
-                log.info(`Session ${sessionId} removed`);
-            });
+        this.listenSocket = null; // Keep track of the listen socket for closing.
+
+        this.app = uWS.App().ws('/*', {
+            /* Options */
+            compression: uWS.SHARED_COMPRESSOR,
+            maxPayloadLength: 16 * 1024 * 1024,
+            idleTimeout: 60,
+            maxBackpressure: 1024,
+
+            /* Handlers */
+            open: (ws, req) => {
+				const sessionId = randomUUID();
+
+                ws.sessionId = sessionId; // Store sessionId on the ws object!
+                log.info(`New WebSocket connection established from ${sessionId}`);
+
+                const session = new CallSession(ws, this.services);
+                this.sessions.set(sessionId, session);
+            },
+            message: (ws, message, isBinary) => {
+                // Get the session using the stored sessionId.
+                const session = this.sessions.get(ws.sessionId);
+                if (session) {
+                    session.handleMessage(message, isBinary); // Pass isBinary for consistency
+                } else {
+                    log.warn(`Received message for unknown session: ${ws.sessionId}`);
+                }
+            },
+            drain: (ws) => {
+                log.warn(`WebSocket backpressure: ${ws.sessionId}, bufferedAmount: ${ws.getBufferedAmount()}`);
+                // You might want to add pause/resume logic in CallSession.
+            },
+            close: (ws, code, message) => {
+                const session = this.sessions.get(ws.sessionId);
+                if(session) {
+                    session._cleanup();
+                }
+                this.sessions.delete(ws.sessionId);  // Ensure session is removed.
+                log.info(`Session ${ws.sessionId} removed`);
+            }
+        }).any('/*', (res, req) => { // HTTP fallback
+            const parsedUrl = new URL(req.getUrl(), `http://${req.getHeader('host')}`);
+             if (parsedUrl.pathname === "/") {
+                res.writeHeader("Content-Type", "text/plain");
+                res.end("aiShield Monitor");
+            } else {
+                res.writeHeader("Content-Type", "text/plain");
+                res.writeStatus('404 Not Found'); // Use writeStatus
+                res.end("Not Found");
+            }
+        }).listen(config.server.port, (listenSocket) => {
+            if (listenSocket) {
+                this.listenSocket = listenSocket; // Store the listen socket.
+                log.info(`Server listening on port ${config.server.port}`);
+            } else {
+                log.error(`Failed to start server on port ${config.server.port}`); // Better error handling
+            }
         });
     }
-    
+
     start() {
-        this.httpServer.listen(config.server.port, () => {
-            log.info(`Server listening on port ${config.server.port}`);
-        });
+        // uWS handles listen in the constructor, so start is not strictly necessary.
+        // However, it's good practice to keep it for consistency and potential future changes.
     }
-    
+
     stop() {
         this.isShuttingDown = true;
-        
+
         // Cleanup all sessions
         for (const session of this.sessions.values()) {
             session._cleanup();
         }
         this.sessions.clear();
-        
-        // Close servers with timeout
-        const closeTimeout = setTimeout(() => {
-            log.warn("Server shutdown timed out, forcing exit");
-            this.httpServer.close();
-        }, 5000);
-        
-        this.wsServer.close(() => {
-            clearTimeout(closeTimeout);
-            log.info("WebSocket server closed");
-            this.httpServer.close(() => {
-                log.info("HTTP server closed");
-            });
-        });
+
+        // Use us_listen_socket_close to gracefully close the server.
+        if (this.listenSocket) {
+            uWS.us_listen_socket_close(this.listenSocket);
+            this.listenSocket = null; // Clear the listen socket
+            log.info("uWebSocket.js server closed");
+        }
     }
 }
 
@@ -694,6 +701,20 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("uncaughtException", (error) => {
     log.error("Uncaught exception", error);
+    
+    // Close all active WebSockets with an error code
+    if (server && server.sessions) {
+        for (const session of server.sessions.values()) {
+            if (session.ws) {
+                try {
+                    session.ws.end(1011, "Server encountered a critical error");
+                } catch (err) {
+                    // Log but continue closing others
+                }
+            }
+        }
+    }
+    
     if (server) server.stop();
     process.exit(1);
 });
