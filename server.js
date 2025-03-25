@@ -316,13 +316,20 @@ class CallSession {
         let interval = baseInterval;
         
         // If processing is taking longer, increase the interval
-        if (processingTime > baseInterval) {
+        const processingTakingLonger = processingTime > baseInterval;
+        if ( processingTakingLonger ) {
             interval = Math.min(processingTime * 1.5, 200); // Cap at 200ms
-            this.metrics.delays[track] = processingTime - baseInterval;
         } else {
             interval = Math.max(baseInterval - 5, 10); // Try to catch up, but not too fast
-            this.metrics.delays[track] = 0;
         }
+        
+        if ( process.env.WANT_MONITORING ) {            
+        	if ( processingTakingLonger ) {
+            	this.metrics.delays[track] = processingTime - baseInterval;
+        	} else {
+            	this.metrics.delays[track] = 0;
+        	}
+        }           
         
         // Schedule the timer
         this.flushTimer[track] = setTimeout(() => {
@@ -336,7 +343,11 @@ class CallSession {
         let offset = this.audioAccumulatorOffset[track];
         const maxSize = this.MAX_BUFFER_SIZE;
         const accumulator = this.audioAccumulator[track];
-        const growthMetric = this.metrics.bufferGrowth[track];
+        
+        let growthMetric;        
+        if ( process.env.WANT_MONITORING ) {            
+        	growthMetric = this.metrics.bufferGrowth[track];
+        }   
         
         // If the new data would exceed the maximum buffer size, flush immediately.
         if ((offset + bufLen) > maxSize) {
@@ -350,8 +361,10 @@ class CallSession {
         offset += bufLen;
         this.audioAccumulatorOffset[track] = offset;
         
-        // Record buffer growth.
-        growthMetric.push(bufLen);
+        if ( process.env.WANT_MONITORING ) {            
+	        // Record buffer growth.
+	        growthMetric.push(bufLen);
+        }   
         
         // Adjust the flush threshold based on previous processing time.
         const pTime = this.lastProcessingTime[track];
@@ -389,24 +402,32 @@ class CallSession {
         const combinedBuffer = accumulator.slice(0, offset);
         const bufferSize = combinedBuffer.length;
         const sttService = this.sttService[track];
-        const deepgramMetrics = this.metrics.deepgram;
         const now = performance.now();
         this.processingStartTime[track] = now;
         
+		let deepgramMetrics, delta;
+        if ( process.env.WANT_MONITORING ) {            
+			deepgramMetrics = this.metrics.deepgram;
+			delta = now - deepgramMetrics.lastSendTime[track];            
+        }
+                
         try {
             if (sttService && sttService.connected) {
-                const delta = now - deepgramMetrics.lastSendTime[track];
-                // Send the buffered data.
+
                 sttService.send(combinedBuffer);
                 
-                deepgramMetrics.bytesSent[track] += bufferSize;
-                deepgramMetrics.packetsSent[track]++;
-                if (delta > 0) {
-                    deepgramMetrics.sendRates[track].push(bufferSize / (delta / 1000));
-                }
-                deepgramMetrics.lastSendTime[track] = now;
+        		if ( process.env.WANT_MONITORING ) {
+                	deepgramMetrics.bytesSent[track] += bufferSize;
+                	deepgramMetrics.packetsSent[track]++;
+                	if (delta > 0) {
+                    	deepgramMetrics.sendRates[track].push(bufferSize / (delta / 1000));
+                	}
+                	deepgramMetrics.lastSendTime[track] = now;
+                 }                   
+                
                 // Reset error count on successful send.
                 this.consecutiveErrors[track] = 0;
+                
             } else {
                 log.warn(`STT service not connected for ${track} track, buffered ${offset} bytes`);
                 if (bufferSize > 64 * 1024) {
