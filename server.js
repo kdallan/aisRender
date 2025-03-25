@@ -134,10 +134,8 @@ class CallSession {
         this.services = services;
         this.callSid = null;
         this.conferenceName = "";
-        this.streamSid = null;
         this.active = true;
         this.hangupInitiated = false;
-        this.hasSeenMedia = false;
         
         // Cache the buffer to decode "base64" into
         
@@ -292,7 +290,7 @@ class CallSession {
         // Cancel the previous timer, if any        
         this.stopFlushTimer(track);
         
-        if (this.isShuttingDown) {
+        if ( !this.active || this.isShuttingDown) {
             return;
         }
         
@@ -325,7 +323,7 @@ class CallSession {
         const growthMetric = this.metrics.bufferGrowth[track];
         
         // If the new data would exceed the maximum buffer size, flush immediately.
-        if (offset + bufLen > maxSize) {
+        if ((offset + bufLen) > maxSize) {
             log.warn(`${track} accumulator full, flushing before appending new data`);
             this.flushAudioBuffer(track);
             offset = this.audioAccumulatorOffset[track]; // Should be reset (usually 0) after flush.
@@ -366,67 +364,66 @@ class CallSession {
         this.stopFlushTimer(track);
         
         const offset = this.audioAccumulatorOffset[track];
-        if (offset > 0) {
-            // Cache frequently used variables locally.
-            const accumulator = this.audioAccumulator[track];
-            const combinedBuffer = accumulator.slice(0, offset);
-            const bufferSize = combinedBuffer.length;
-            const sttService = this.sttService[track];
-            const deepgramMetrics = this.metrics.deepgram;
-            const now = performance.now();
-            this.processingStartTime[track] = now;
-            
-            try {
-                if (sttService && sttService.connected) {
-                    const delta = now - deepgramMetrics.lastSendTime[track];
-                    // Send the buffered data.
-                    sttService.send(combinedBuffer);
-                    
-                    deepgramMetrics.bytesSent[track] += bufferSize;
-                    deepgramMetrics.packetsSent[track]++;
-                    if (delta > 0) {
-                        deepgramMetrics.sendRates[track].push(bufferSize / (delta / 1000));
-                    }
-                    deepgramMetrics.lastSendTime[track] = now;
-                    // Reset error count on successful send.
-                    this.consecutiveErrors[track] = 0;
-                } else {
-                    log.warn(`STT service not connected for ${track} track, buffered ${offset} bytes`);
-                    if (bufferSize > 64 * 1024) {
-                        this.consecutiveErrors[track]++;
-                    }
+        if( 0 === offset ) {
+        	this.startFlushTimer(track);
+        }
+        	
+        // Cache frequently used variables locally.
+        const accumulator = this.audioAccumulator[track];
+        const combinedBuffer = accumulator.slice(0, offset);
+        const bufferSize = combinedBuffer.length;
+        const sttService = this.sttService[track];
+        const deepgramMetrics = this.metrics.deepgram;
+        const now = performance.now();
+        this.processingStartTime[track] = now;
+        
+        try {
+            if (sttService && sttService.connected) {
+                const delta = now - deepgramMetrics.lastSendTime[track];
+                // Send the buffered data.
+                sttService.send(combinedBuffer);
+                
+                deepgramMetrics.bytesSent[track] += bufferSize;
+                deepgramMetrics.packetsSent[track]++;
+                if (delta > 0) {
+                    deepgramMetrics.sendRates[track].push(bufferSize / (delta / 1000));
                 }
-            } catch (err) {
-                log.error(`Error sending ${track} audio to Deepgram`, err);
-                this.consecutiveErrors[track]++;
-            } finally {
-                // Reset the accumulator offset.
-                this.audioAccumulatorOffset[track] = 0;
-                const procTime = performance.now() - this.processingStartTime[track];
-                this.lastProcessingTime[track] = procTime;
-                this.metrics.processingTimes[track].push(procTime);
-                this.metrics.deepgram.responseTimes[track].push(procTime);
-            }
-            
-            // Circuit breaker: if error count is too high, reset the STT service.
-            if (this.consecutiveErrors[track] >= this.MAX_CONSECUTIVE_ERRORS) {
-                log.error(`Circuit breaker triggered for ${track} track after ${this.consecutiveErrors[track]} errors`);
-                if (sttService) {
-                    sttService.cleanup();
-                    this.sttService[track] = new DeepgramSTTService(
-                                                                    this.services.config.deepgram,
-                                                                    (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
-                                                                    (utterance) => this._handleUtteranceEnd(utterance, track)
-                                                                    );
-                }
+                deepgramMetrics.lastSendTime[track] = now;
+                // Reset error count on successful send.
                 this.consecutiveErrors[track] = 0;
+            } else {
+                log.warn(`STT service not connected for ${track} track, buffered ${offset} bytes`);
+                if (bufferSize > 64 * 1024) {
+                    this.consecutiveErrors[track]++;
+                }
             }
+        } catch (err) {
+            log.error(`Error sending ${track} audio to Deepgram`, err);
+            this.consecutiveErrors[track]++;
+        } finally {
+            // Reset the accumulator offset.
+            this.audioAccumulatorOffset[track] = 0;
+            const procTime = performance.now() - this.processingStartTime[track];
+            this.lastProcessingTime[track] = procTime;
+            this.metrics.processingTimes[track].push(procTime);
+            this.metrics.deepgram.responseTimes[track].push(procTime);
         }
         
-        // Restart the flush timer if the session is still active.
-        if (this.active && !this.isShuttingDown) {
-            this.startFlushTimer(track);
+        // Circuit breaker: if error count is too high, reset the STT service.
+        if (this.consecutiveErrors[track] >= this.MAX_CONSECUTIVE_ERRORS) {
+            log.error(`Circuit breaker triggered for ${track} track after ${this.consecutiveErrors[track]} errors`);
+            if (sttService) {
+                sttService.cleanup();
+                this.sttService[track] = new DeepgramSTTService(
+                                                                this.services.config.deepgram,
+                                                                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
+                                                                (utterance) => this._handleUtteranceEnd(utterance, track)
+                                                                );
+            }
+            this.consecutiveErrors[track] = 0;
         }
+        
+        this.startFlushTimer(track);
     }
     
     // Message handling
@@ -449,18 +446,6 @@ class CallSession {
             switch (data.event) {
             case "media": {
                 this.receivedPackets++;
-                
-                // Handle first media event.
-                if (!this.hasSeenMedia) {
-                    this.hasSeenMedia = true;
-                    log.info("Twilio: First media event received");
-                }
-                
-                // Set stream SID if not already set.
-                if (!this.streamSid && data.streamSid) {
-                    this.streamSid = data.streamSid;
-                    log.info(`Twilio: Stream SID: ${this.streamSid}`);
-                }
                 
                 // Process media payload if it exists.
                 const { media } = data;
