@@ -1,17 +1,14 @@
 // Import required modules
-const http = require("http");
-const https = require("https");
-const WebSocket = require("ws");
-const TranscriptHistory = require("./transcripthistory");  // Keep the original implementation
+const http = require( "http" );
+const https = require( "https" );
+const WebSocket = require( "ws" );
+const TranscriptHistory = require( "./transcripthistory" );
 const { addParticipant, TwilioService } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
 const simdjson = require('simdjson');
 
 require("dotenv").config();
-
-const NODE_ENV = process.env.NODE_ENV || 'development';
-const IS_PRODUCTION = NODE_ENV === 'production';
 
 const scamPhrases_1 = [
     { phrase: "hangup", type: "cmd" },
@@ -114,7 +111,7 @@ const config = (() => {
             ttsWebsocketURL: process.env.DEEPGRAM_TTS_WS_URL || 
             "wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none",
             sttConfig: {
-                model: process.env.DEEPGRAM_MODEL || "nova-3", 
+                model: process.env.DEEPGRAM_MODEL || "nova-3", // "nova-2-phonecall",
                 language: process.env.DEEPGRAM_LANGUAGE || "en",
                 encoding: "mulaw",
                 sample_rate: 8000,
@@ -128,6 +125,7 @@ const config = (() => {
         }
     };
 })();
+
 
 // CallSession - Optimized version with Deepgram data tracking
 class CallSession {
@@ -177,17 +175,6 @@ class CallSession {
                 sendRates: { inbound: [], outbound: [] },
                 lastSendTime: { inbound: performance.now(), outbound: performance.now() },
                 responseTimes: { inbound: [], outbound: [] }
-            },
-            // Enhanced performance metrics
-            heap: {
-                lastUsed: process.memoryUsage().heapUsed,
-                measurements: []
-            },
-            callDuration: 0,
-            lastActivityTime: performance.now(),
-            throughput: {
-                inbound: { bytes: 0, lastTimestamp: performance.now() },
-                outbound: { bytes: 0, lastTimestamp: performance.now() }
             }
         };
         
@@ -202,24 +189,23 @@ class CallSession {
             outbound: 0
         };        
         
-        // Using the original TranscriptHistory implementation
         this.transcriptHistory = {
-            inbound: new TranscriptHistory(scamPhrases_1),
-            outbound: new TranscriptHistory(scamPhrases_1)
+            inbound: new TranscriptHistory( scamPhrases_1 ),
+            outbound: new TranscriptHistory( scamPhrases_1 )
         };
         
         // Initialize STT services - one for each track
         this.sttService = {
             inbound: new DeepgramSTTService(
-                this.services.config.deepgram,
-                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'inbound'),
-                (utterance) => this._handleUtteranceEnd(utterance, 'inbound')
-            ),
+                                            this.services.config.deepgram,
+                                            (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'inbound'),
+                                            (utterance) => this._handleUtteranceEnd(utterance, 'inbound')
+                                            ),
             outbound: new DeepgramSTTService(
-                this.services.config.deepgram,
-                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'outbound'),
-                (utterance) => this._handleUtteranceEnd(utterance, 'outbound')
-            )
+                                             this.services.config.deepgram,
+                                             (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'outbound'),
+                                             (utterance) => this._handleUtteranceEnd(utterance, 'outbound')
+                                             )
         };
         
         // Setup WebSocket handlers
@@ -241,7 +227,7 @@ class CallSession {
                 log.info(`Performance metrics: 
           Inbound: buffer=${this.audioAccumulatorSize.inbound} bytes, avgProcessing=${avgProcessingTimeInbound.toFixed(2)}ms, delay=${this.metrics.delays.inbound.toFixed(2)}ms
           Outbound: buffer=${this.audioAccumulatorSize.outbound} bytes, avgProcessing=${avgProcessingTimeOutbound.toFixed(2)}ms, delay=${this.metrics.delays.outbound.toFixed(2)}ms`
-                );
+                         );
                 
                 // Log Deepgram stats
                 this.logDeepgramStats();
@@ -252,45 +238,6 @@ class CallSession {
                 this.metrics.lastMetricTime = now;
             }
         }, 30000);
-        
-        // Track memory usage periodically
-        this.memoryMonitorInterval = setInterval(() => {
-            if (this.active) {
-                const heap = process.memoryUsage().heapUsed;
-                const delta = heap - this.metrics.heap.lastUsed;
-                
-                if (this.metrics.heap.measurements.length >= 10) {
-                    this.metrics.heap.measurements.shift();
-                }
-                
-                this.metrics.heap.measurements.push({
-                    time: performance.now(),
-                    heap,
-                    delta
-                });
-                
-                this.metrics.heap.lastUsed = heap;
-                
-                // Check for concerning memory growth
-                const totalGrowth = this.metrics.heap.measurements.reduce((sum, m) => sum + m.delta, 0);
-                if (totalGrowth > 50 * 1024 * 1024) { // 50MB growth is concerning
-                    log.warn(`High memory growth detected: ${(totalGrowth / 1024 / 1024).toFixed(2)}MB growth`);
-                    
-                    // Suggest garbage collection if available
-                    if (global.gc) {
-                        try {
-                            global.gc();
-                            log.info("Manual garbage collection triggered");
-                        } catch (e) {
-                            // Ignore if not available
-                        }
-                    }
-                }
-            }
-        }, 30000); // Every 30 seconds
-        
-        // Add a flag to track last activity time
-        this.lastActivity = Date.now();
         
         log.info("New call session created with optimized processing and data tracking");
     }
@@ -305,30 +252,6 @@ class CallSession {
         if (bytes < 1024) return `${bytes} B`;
         if (bytes < 1048576) return `${(bytes / 1024).toFixed(2)} KB`;
         return `${(bytes / 1048576).toFixed(2)} MB`;
-    }
-    
-    // Method to track throughput
-    trackThroughput(bytes, direction) {
-        const now = performance.now();
-        const throughput = this.metrics.throughput[direction];
-        
-        throughput.bytes += bytes;
-        
-        const elapsed = now - throughput.lastTimestamp;
-        if (elapsed > 5000) { // Update every 5 seconds
-            const bytesPerSecond = throughput.bytes / (elapsed / 1000);
-            throughput.rate = bytesPerSecond;
-            throughput.bytes = 0;
-            throughput.lastTimestamp = now;
-            
-            // Only log if there's significant throughput
-            if (bytesPerSecond > 10000) { // 10KB/s
-                log.debug(`${direction} throughput: ${(bytesPerSecond / 1024).toFixed(2)} KB/s`);
-            }
-        }
-        
-        // Update last activity time
-        this.lastActivity = Date.now();
     }
     
     // New method to log detailed Deepgram stats
@@ -389,290 +312,211 @@ class CallSession {
         }, interval);
     }
     
-    // Optimized accumulateAudio method
     accumulateAudio(buffer, track) {
-        // Early return if shutting down
-        if (this.isShuttingDown) return;
-        
-        // Direct variable access instead of property lookups in hot path
+        // Cache frequently accessed values.
         const bufLen = buffer.length;
-        const offset = this.audioAccumulatorOffset[track];
-        const accumulator = this.audioAccumulator[track];
-        const threshold = this.bufferSizeThreshold[track];
+        let offset = this.audioAccumulatorOffset[track];
         const maxSize = this.MAX_BUFFER_SIZE;
+        const accumulator = this.audioAccumulator[track];
+        const growthMetric = this.metrics.bufferGrowth[track];
         
-        // Check if buffer needs flushing before adding new data
+        // If the new data would exceed the maximum buffer size, flush immediately.
         if (offset + bufLen > maxSize) {
+            log.warn(`${track} accumulator full, flushing before appending new data`);
             this.flushAudioBuffer(track);
-            // After flush, offset should be 0
-            buffer.copy(accumulator, 0);
-            this.audioAccumulatorOffset[track] = bufLen;
-            
-            // Record buffer growth with less overhead
-            if (this.metrics.bufferGrowth[track].length < 100) { // Limit array size
-                this.metrics.bufferGrowth[track].push(bufLen);
-            }
-            
-            // Start timer if needed
-            if (!this.flushTimer[track] && !this.isShuttingDown) {
-                this.startFlushTimer(track);
-            }
-            return;
+            offset = this.audioAccumulatorOffset[track]; // Should be reset (usually 0) after flush.
         }
         
-        // Fast path: copy buffer and update offset
+        // Copy the incoming data into the preallocated buffer.
         buffer.copy(accumulator, offset);
-        this.audioAccumulatorOffset[track] = offset + bufLen;
+        offset += bufLen;
+        this.audioAccumulatorOffset[track] = offset;
         
-        // Record buffer growth with less overhead
-        if (this.metrics.bufferGrowth[track].length < 100) { // Limit array size
-            this.metrics.bufferGrowth[track].push(bufLen);
-        }
+        // Record buffer growth.
+        growthMetric.push(bufLen);
         
-        // Track throughput
-        this.trackThroughput(bufLen, track);
-        
-        // Dynamic threshold adjustment
+        // Adjust the flush threshold based on previous processing time.
         const pTime = this.lastProcessingTime[track];
         if (pTime > 0) {
             if (pTime < 10) {
-                // Processing is fast, decrease threshold
-                this.bufferSizeThreshold[track] = Math.max(1024, threshold - 128);
+                this.bufferSizeThreshold[track] = Math.max(1024, this.bufferSizeThreshold[track] - 128);
             } else if (pTime > 50) {
-                // Processing is slow, increase threshold
-                this.bufferSizeThreshold[track] = Math.min(8 * 1024, threshold + 256);
+                this.bufferSizeThreshold[track] = Math.min(8 * 1024, this.bufferSizeThreshold[track] + 256);
             }
         }
         
-        // Flush if threshold reached
-        if (offset + bufLen >= threshold) {
+        // Flush immediately if the current offset exceeds the dynamic threshold.
+        if (offset >= this.bufferSizeThreshold[track]) {
             this.flushAudioBuffer(track);
             return;
         }
         
-        // Start timer if needed
-        if (!this.flushTimer[track] && !this.isShuttingDown) {
+        // If no flush timer is active, start one.
+        if (!this.flushTimer[track]) {
             this.startFlushTimer(track);
         }
     }
     
-    // Optimized flushAudioBuffer method
     flushAudioBuffer(track) {
-        // Immediately stop any running flush timer
+        // Immediately stop any running flush timer.
         this.stopFlushTimer(track);
         
         const offset = this.audioAccumulatorOffset[track];
-        if (offset <= 0) {
-            // No data to flush, just restart timer if needed
-            if (this.active && !this.isShuttingDown) {
-                this.startFlushTimer(track);
-            }
-            return;
-        }
-        
-        // Cache frequently used variables locally
-        const accumulator = this.audioAccumulator[track];
-        const sttService = this.sttService[track];
-        const now = performance.now();
-        this.processingStartTime[track] = now;
-        
-        try {
-            if (sttService && sttService.connected) {
-                // Create a slice view instead of copying the buffer
-                const view = accumulator.subarray(0, offset);
-                
-                // Send the buffered data
-                sttService.send(view);
-                
-                // Update metrics
-                const deepgramMetrics = this.metrics.deepgram;
-                deepgramMetrics.bytesSent[track] += offset;
-                deepgramMetrics.packetsSent[track]++;
-                
-                const delta = now - deepgramMetrics.lastSendTime[track];
-                if (delta > 0) {
-                    // Keep rate history limited to prevent array growth
-                    const rates = deepgramMetrics.sendRates[track];
-                    if (rates.length >= 100) rates.shift();
-                    rates.push(offset / (delta / 1000));
-                }
-                deepgramMetrics.lastSendTime[track] = now;
-                
-                // Reset error count on successful send
-                this.consecutiveErrors[track] = 0;
-            } else {
-                // Service not connected
-                if (offset > 64 * 1024) {
-                    this.consecutiveErrors[track]++;
-                }
-            }
-        } catch (err) {
-            this.consecutiveErrors[track]++;
+        if (offset > 0) {
+            // Cache frequently used variables locally.
+            const accumulator = this.audioAccumulator[track];
+            const combinedBuffer = accumulator.slice(0, offset);
+            const bufferSize = combinedBuffer.length;
+            const sttService = this.sttService[track];
+            const deepgramMetrics = this.metrics.deepgram;
+            const now = performance.now();
+            this.processingStartTime[track] = now;
             
-            // Only log errors occasionally to reduce overhead
-            if (this.consecutiveErrors[track] % 5 === 1) {
+            try {
+                if (sttService && sttService.connected) {
+                    const delta = now - deepgramMetrics.lastSendTime[track];
+                    // Send the buffered data.
+                    sttService.send(combinedBuffer);
+                    
+                    deepgramMetrics.bytesSent[track] += bufferSize;
+                    deepgramMetrics.packetsSent[track]++;
+                    if (delta > 0) {
+                        deepgramMetrics.sendRates[track].push(bufferSize / (delta / 1000));
+                    }
+                    deepgramMetrics.lastSendTime[track] = now;
+                    // Reset error count on successful send.
+                    this.consecutiveErrors[track] = 0;
+                } else {
+                    log.warn(`STT service not connected for ${track} track, buffered ${offset} bytes`);
+                    if (bufferSize > 64 * 1024) {
+                        this.consecutiveErrors[track]++;
+                    }
+                }
+            } catch (err) {
                 log.error(`Error sending ${track} audio to Deepgram`, err);
+                this.consecutiveErrors[track]++;
+            } finally {
+                // Reset the accumulator offset.
+                this.audioAccumulatorOffset[track] = 0;
+                const procTime = performance.now() - this.processingStartTime[track];
+                this.lastProcessingTime[track] = procTime;
+                this.metrics.processingTimes[track].push(procTime);
+                this.metrics.deepgram.responseTimes[track].push(procTime);
             }
-        } finally {
-            // Reset the accumulator offset
-            this.audioAccumulatorOffset[track] = 0;
             
-            // Update timing metrics with limits to prevent array growth
-            const procTime = performance.now() - this.processingStartTime[track];
-            this.lastProcessingTime[track] = procTime;
-            
-            const processingTimes = this.metrics.processingTimes[track];
-            if (processingTimes.length >= 100) processingTimes.shift();
-            processingTimes.push(procTime);
-            
-            const responseTimes = this.metrics.deepgram.responseTimes[track];
-            if (responseTimes.length >= 100) responseTimes.shift();
-            responseTimes.push(procTime);
+            // Circuit breaker: if error count is too high, reset the STT service.
+            if (this.consecutiveErrors[track] >= this.MAX_CONSECUTIVE_ERRORS) {
+                log.error(`Circuit breaker triggered for ${track} track after ${this.consecutiveErrors[track]} errors`);
+                if (sttService) {
+                    sttService.cleanup();
+                    this.sttService[track] = new DeepgramSTTService(
+                                                                    this.services.config.deepgram,
+                                                                    (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
+                                                                    (utterance) => this._handleUtteranceEnd(utterance, track)
+                                                                    );
+                }
+                this.consecutiveErrors[track] = 0;
+            }
         }
         
-        // Circuit breaker: if error count is too high, reset the STT service
-        if (this.consecutiveErrors[track] >= this.MAX_CONSECUTIVE_ERRORS) {
-            log.error(`Circuit breaker triggered for ${track} track after ${this.consecutiveErrors[track]} errors`);
-            if (sttService) {
-                sttService.cleanup();
-                this.sttService[track] = new DeepgramSTTService(
-                    this.services.config.deepgram,
-                    (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
-                    (utterance) => this._handleUtteranceEnd(utterance, track)
-                );
-            }
-            this.consecutiveErrors[track] = 0;
-        }
-        
-        // Restart the flush timer if the session is still active
+        // Restart the flush timer if the session is still active.
         if (this.active && !this.isShuttingDown) {
             this.startFlushTimer(track);
         }
     }
     
-    // Optimized message handling
+    // Message handling
     _handleMessage(message) {
         if (!this.active) return;
         
+        let data;
         try {
-            // Fast path for Buffer messages (most common case)
-            let jsonStr;
-            if (Buffer.isBuffer(message)) {
-                // Skip toString for media events (use simdjson directly)
-                const firstByte = message[0];
-                
-                // Quick check if this looks like a JSON object with media event
-                // '{' character is 123 in ASCII
-                if (firstByte === 123) {
-                    // Fast path: check for media event
-                    if (message.length > 10 && 
-                        message[2] === 101 && // 'e'
-                        message[3] === 118 && // 'v'
-                        message[4] === 101 && // 'e'
-                        message[5] === 110 && // 'n'
-                        message[6] === 116 && // 't'
-                        message[8] === 109 && // 'm'
-                        message[9] === 101 && // 'e'
-                        message[10] === 100   // 'd'
-                    ) {
-                        // This is likely a media event, process directly
-                        const data = simdjson.parse(message);
-                        if (data.event === "media") {
-                            this.receivedPackets++;
-                            
-                            // Media setup on first packet
-                            if (!this.hasSeenMedia) {
-                                this.hasSeenMedia = true;
-                            }
-                            
-                            // Set stream SID if needed
-                            if (!this.streamSid && data.streamSid) {
-                                this.streamSid = data.streamSid;
-                            }
-                            
-                            // Process media payload - fast path
-                            const { media } = data;
-                            if (media && media.payload) {
-                                const { payload, track } = media;
-                                if (track === "inbound" || track === "outbound") {
-                                    this.inboundPackets++;
-                                    // Use Buffer.from with encoding for better performance
-                                    this.accumulateAudio(Buffer.from(payload, "base64"), track);
-                                }
-                            }
-                            return; // Early return after processing media
-                        }
-                    }
-                }
-                
-                // Slower path for non-media JSON messages
-                jsonStr = message.toString('utf8');
-            } else if (typeof message === 'string') {
-                jsonStr = message;
-            } else {
-                return; // Not a valid message format
-            }
-            
-            // Parse JSON for non-media events
+            // Convert the message to a string if it's a Buffer, otherwise use it directly.
+            const jsonStr = Buffer.isBuffer(message)
+              ? message.toString('utf8')
+              : (typeof message === 'string' ? message : null);
+
+            // If we don't have a valid JSON string, exit early.
+            if (jsonStr === null) return;
+
             const data = simdjson.parse(jsonStr);
             
-            // Handle by event type
+            // Process by event type
             switch (data.event) {
-                case "connected":
-                    // No need to log every connected event
-                    break;
-                    
-                case "start":
-                    this.callSid = data.start?.callSid || data.callSid;
-                    this.conferenceName = data.start?.customParameters?.conferenceName;
-                    if (this.callSid) {
-                        log.info(`Twilio: Call started, SID: ${this.callSid}${this.conferenceName ? 
-                               `, Conference: ${this.conferenceName}` : ''}`);
+            case "media": {
+                this.receivedPackets++;
+                
+                // Handle first media event.
+                if (!this.hasSeenMedia) {
+                    this.hasSeenMedia = true;
+                    log.info("Twilio: First media event received");
+                }
+                
+                // Set stream SID if not already set.
+                if (!this.streamSid && data.streamSid) {
+                    this.streamSid = data.streamSid;
+                    log.info(`Twilio: Stream SID: ${this.streamSid}`);
+                }
+                
+                // Process media payload if it exists.
+                const { media } = data;
+                if (media && media.payload) {
+                    const { payload, track } = media;
+                    // Only process inbound or outbound tracks.
+                    if (track === "inbound" || track === "outbound") {
+                        this.inboundPackets++; // Assuming both increment the same counter.
+                        // Create raw audio buffer and accumulate it.
+                        this.accumulateAudio(Buffer.from(payload, "base64"), track);
                     }
-                    break;
-                    
-                case "close":
-                    this._cleanup();
-                    break;
-                    
-                default:
-                    // Ignore other events
-                    break;
+                }
+                break;
+            }
+            
+            case "connected":
+                log.info("Twilio: Connected event received");
+                break;
+                
+            case "start":
+                this.callSid = data.start?.callSid || data.callSid;
+                if (this.callSid) {
+                    log.info(`Twilio: Call started, SID: ${this.callSid}`);
+                }
+                
+                this.conferenceName = data.start?.customParameters?.conferenceName;
+                if( this.conferenceName ) {
+                    log.info(`\tConference name: ${this.conferenceName}`);
+                }
+                
+                log.info("JSON:", JSON.stringify(data, null, 2));                
+                break;            
+                
+            case "close":
+                log.info("Twilio: Close event received");
+                this._cleanup();
+                break;
             }
         } catch (error) {
-            // Only log genuine errors, not expected parsing issues
-            if (!(error.message && error.message.includes("Unexpected token"))) {
-                log.error("Error processing message", error);
-            }
+            log.error("Error processing message", error);
         }
     }
     
-    // Transcript handling - process both interim and final results
+    // Transcript handling - now includes track information
     _handleTranscript(transcript, isFinal, track) {
         if (!this.active || this.hangupInitiated) return;
         
-        // Log all transcripts, including interim ones
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
         
-        // Push all transcripts to history (interim and final)
-        this.transcriptHistory[track].push(transcript);
+        this.transcriptHistory[ track ].push( transcript );
         
-        // Check for scam phrases in all transcripts
-        let hit = this.transcriptHistory[track].findScamPhrases();
-        if (hit !== null) {    
-            log.info("Scam phrase: " + JSON.stringify(hit, null, 2));
+        let hit = this.transcriptHistory[ track ].findScamPhrases();
+        if( hit !== null ) {    
+            log.info("Scam phrase: " + JSON.stringify( hit, null, 2 ));
             this._handleHangup("Scam phrase detected. Goodbye.");
         }
-        
-        // Update last activity time
-        this.lastActivity = Date.now();
     }
     
     _handleUtteranceEnd(utterance, track) {
-        if (this.active) {
-            log.info(`[${track}] Complete utterance: ${utterance}`);
-            this.lastActivity = Date.now();
-        }
+        if (this.active) log.info(`[${track}] Complete utterance: ${utterance}`);
     }
     
     // Call control
@@ -680,12 +524,14 @@ class CallSession {
         if (!this.active || !this.callSid || this.hangupInitiated) return;
         
         try {
+            
             this.hangupInitiated = true;
             log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
             
             await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
             
         } catch (error) {
+            
             log.error("Failed to hang up call", error);
         }
     }
@@ -713,23 +559,6 @@ class CallSession {
             clearInterval(this.statsTimer);
             this.statsTimer = null;
         }
-        
-        // Clear memory monitor interval
-        if (this.memoryMonitorInterval) {
-            clearInterval(this.memoryMonitorInterval);
-            this.memoryMonitorInterval = null;
-        }
-        
-        // Log final memory metrics
-        const currentHeap = process.memoryUsage().heapUsed;
-        const initialHeap = this.metrics.heap.lastUsed - this.metrics.heap.measurements.reduce((sum, m) => sum + m.delta, 0);
-        const growth = currentHeap - initialHeap;
-        
-        log.info(`Memory metrics for call ${this.callSid || 'unknown'}:
-            Initial heap: ${(initialHeap / 1024 / 1024).toFixed(2)}MB
-            Final heap: ${(currentHeap / 1024 / 1024).toFixed(2)}MB
-            Growth: ${(growth / 1024 / 1024).toFixed(2)}MB
-        `);
         
         // Stop flush timers for both tracks
         this.stopFlushTimer('inbound');
@@ -763,7 +592,7 @@ class CallSession {
     }
 }
 
-// VoiceServer with optimizations
+// VoiceServer
 class VoiceServer {
     constructor() {
         this.services = {
@@ -783,26 +612,7 @@ class VoiceServer {
             }
         });
         
-        // Optimize event listeners - use noServer mode for better performance
-        this.wsServer = new WebSocket.Server({ 
-            noServer: true,
-            perMessageDeflate: {
-                zlibDeflateOptions: {
-                    // Optimize for speed vs compression ratio
-                    level: 1,
-                    memLevel: 7
-                }
-            }
-        });
-        
-        // Optimize HTTP server with proper headers
-        this.httpServer.on('upgrade', (request, socket, head) => {
-            // Validate the WebSocket upgrade request here if needed
-            this.wsServer.handleUpgrade(request, socket, head, (ws) => {
-                this.wsServer.emit('connection', ws, request);
-            });
-        });
-        
+        this.wsServer = new WebSocket.Server({ server: this.httpServer });
         this.sessions = new Map();
         this.isShuttingDown = false;
         
@@ -818,48 +628,6 @@ class VoiceServer {
                 log.info(`Session ${sessionId} removed`);
             });
         });
-        
-        // Session cleanup interval to handle orphaned sessions
-        this.cleanupInterval = setInterval(() => {
-            const now = Date.now();
-            this.sessions.forEach((session, id) => {
-                if (!session.active || (now - session.lastActivity > 300000)) { // 5 minutes
-                    session._cleanup();
-                    this.sessions.delete(id);
-                    log.info(`Cleaned up inactive session ${id}`);
-                }
-            });
-        }, 60000); // Check every minute
-        
-        // Optimize Node.js runtime
-        this._optimizeRuntime();
-    }
-    
-    _optimizeRuntime() {
-        // Increase max listeners to prevent memory leaks warnings
-        this.httpServer.setMaxListeners(100);
-        this.wsServer.setMaxListeners(100);
-        
-        // Set TCP keep-alive for persistent connections
-        this.httpServer.keepAliveTimeout = 65000; // slightly higher than default ALB idle timeout
-        this.httpServer.headersTimeout = 66000; // slightly higher than keepAliveTimeout
-        
-        if (IS_PRODUCTION) {
-            // Disable debugging in production for better performance
-            Error.stackTraceLimit = 10; // Reduce stack trace size
-            
-            // Enable GC optimization hints if supported
-            if (global.gc) {
-                // Schedule periodic GC to prevent spikes
-                setInterval(() => {
-                    try {
-                        global.gc();
-                    } catch (e) {
-                        // Ignore if not available
-                    }
-                }, 30000); // Every 30 seconds
-            }
-        }
     }
     
     start() {
@@ -871,55 +639,25 @@ class VoiceServer {
     stop() {
         this.isShuttingDown = true;
         
-        // Clear the cleanup interval
-        if (this.cleanupInterval) {
-            clearInterval(this.cleanupInterval);
-            this.cleanupInterval = null;
-        }
-        
-        // Create an array of promises for each session cleanup
-        const cleanupPromises = [];
+        // Cleanup all sessions
         for (const session of this.sessions.values()) {
-            cleanupPromises.push(new Promise(resolve => {
-                session._cleanup();
-                resolve();
-            }));
+            session._cleanup();
         }
+        this.sessions.clear();
         
-        // Clear sessions after cleanup
-        Promise.all(cleanupPromises).then(() => {
-            this.sessions.clear();
-            log.info("All sessions cleaned up");
-        });
+        // Close servers with timeout
+        const closeTimeout = setTimeout(() => {
+            log.warn("Server shutdown timed out, forcing exit");
+            this.httpServer.close();
+        }, 5000);
         
-        // Close servers with improved timeout handling
-        const wsClosePromise = new Promise(resolve => {
-            this.wsServer.close(() => {
-                log.info("WebSocket server closed");
-                resolve();
-            });
-        });
-        
-        const httpClosePromise = new Promise(resolve => {
+        this.wsServer.close(() => {
+            clearTimeout(closeTimeout);
+            log.info("WebSocket server closed");
             this.httpServer.close(() => {
                 log.info("HTTP server closed");
-                resolve();
             });
         });
-        
-        // Force close after timeout
-        const forceClosePromise = new Promise(resolve => {
-            setTimeout(() => {
-                log.warn("Server shutdown timed out, forcing exit");
-                resolve();
-            }, 5000);
-        });
-        
-        // Race between normal close and forced close
-        return Promise.race([
-            Promise.all([wsClosePromise, httpClosePromise]),
-            forceClosePromise
-        ]);
     }
 }
 
