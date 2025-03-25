@@ -471,7 +471,8 @@ class CallSession {
         let data;
         try {
              // uWS always gives ArrayBuffer.  Need to convert to string.
-            data = simdjson.lazyParse(message.toString('utf8'));
+            const messageString = Buffer.from(message).toString('utf8');
+            data = simdjson.lazyParse(messageString);
 
             let event = data.valueForKeyPath("event");
 
@@ -485,7 +486,7 @@ class CallSession {
                     if (track === "inbound" || track === "outbound") {
                         this.inboundPackets++;
 
-                        // Decode base64 payload using the preallocated buffer
+                        // Decode base64 payload.
                         const bytesWritten = this.decodeBuffer.write( payload, 0, "base64" );
                         const audioBuffer = this.decodeBuffer.slice( 0, bytesWritten );
                         this.accumulateAudio(audioBuffer, track);
