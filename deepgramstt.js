@@ -68,16 +68,16 @@ class DeepgramSTTService {
     }
     
     _setupEventListeners() {
-    	if( !this.deepgram ) return;
-        
+    	let dg = this.deepgram;
+              
         // Open event
-        this.deepgram.addListener(LiveTranscriptionEvents.Open, () => {
+        dg?.addListener(LiveTranscriptionEvents.Open, () => {
             log.info("Deepgram STT connection opened");
             this.connected = true;
             this.reconnectAttempts = 0;
             
             // Transcript event
-            this.deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
+            dg?.addListener(LiveTranscriptionEvents.Transcript, (data) => {
                 const transcript = data.channel?.alternatives?.[0]?.transcript;
                 if (!transcript) return;
                 
@@ -96,7 +96,7 @@ class DeepgramSTTService {
             });
             
             // Utterance end event
-            this.deepgram.addListener(LiveTranscriptionEvents.UtteranceEnd, () => {
+            dg?.addListener(LiveTranscriptionEvents.UtteranceEnd, () => {
                 if (this.isFinals.length > 0) {
                     this.onUtteranceEnd?.(this.isFinals.join(" "));
                     this.isFinals = [];
@@ -105,18 +105,18 @@ class DeepgramSTTService {
         });
         
         // Error and close events
-        this.deepgram.addListener(LiveTranscriptionEvents.Close, () => {
+        dg?.addListener(LiveTranscriptionEvents.Close, () => {
             log.info("Deepgram STT connection closed");
             this.connected = false;
             this._handleConnectionFailure();
         });
         
-        this.deepgram.addListener(LiveTranscriptionEvents.Error, (error) => {
+        dg?.addListener(LiveTranscriptionEvents.Error, (error) => {
             log.error("Deepgram STT error: ", error);
             if (!this.connected) this._handleConnectionFailure();
         });
         
-        this.deepgram.addListener(LiveTranscriptionEvents.Warning, (warning) => {
+        dg?.addListener(LiveTranscriptionEvents.Warning, (warning) => {
             log.warn("Deepgram STT warning: ", warning);
         });
     }
