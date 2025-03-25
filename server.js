@@ -126,6 +126,13 @@ const config = (() => {
     };
 })();
 
+function getValueOrDefault( parsedDoc, path, defaultValue ) {
+    try {
+        return parsedDoc.valueForKeyPath( path );
+    } catch (error) {
+        return defaultValue;
+    }
+}
 
 // CallSession - Optimized version with Deepgram data tracking
 class CallSession {
@@ -435,31 +442,29 @@ class CallSession {
         
             // Parse message into JSON
             if (Buffer.isBuffer(message)) {
-                data = simdjson.parse( message.toString("utf8") );
+                data = simdjson.lazyParse( message.toString("utf8") );
             } else if (typeof message === "string") {
-                data = simdjson.parse( message );
+                data = simdjson.lazyParse( message );
             } else {
                 return;
             }        
             
+            let event = data.valueForKeyPath( "event" );
+            
             // Process by event type
-            switch (data.event) {
+            switch (event) {
             case "media": {
                 this.receivedPackets++;
                 
-                // Process media payload if it exists.
-                const { media } = data;
-                if (media && media.payload) {
-                    const { payload, track } = media;
-                    // Only process inbound or outbound tracks.
-                    if (track === "inbound" || track === "outbound") {
-                        this.inboundPackets++; // Assuming both increment the same counter.
-                        
-                        // Create raw audio buffer and accumulate it.
-                        const bytesWritten = this.decodeBuffer.write( payload, 0, "base64" );
-                        const audioBuffer = this.decodeBuffer.slice( 0, bytesWritten );
-                        this.accumulateAudio( audioBuffer, track );
-                    }
+                let payload = data.valueForKeyPath( "media.payload" );
+                let track = data.valueForKeyPath( "media.track" );
+                
+                if (track === "inbound" || track === "outbound") {
+                    this.inboundPackets++; // Assuming both increment the same counter.
+                    
+                    const bytesWritten = this.decodeBuffer.write( payload, 0, "base64" );
+                    const audioBuffer = this.decodeBuffer.slice( 0, bytesWritten );
+                    this.accumulateAudio( audioBuffer, track );
                 }
                 break;
             }
@@ -469,18 +474,14 @@ class CallSession {
                 break;
                 
             case "start":
-                this.callSid = data.start?.callSid || data.callSid;
-                if (this.callSid) {
-                    log.info(`Twilio: Call started, SID: ${this.callSid}`);
-                }
+        		// this.callSid = data.start?.callSid || data.callSid;
+                this.callSid = getValueOrDefault( data, "start.callSid", null );
+                log.info(`Twilio: Call started, SID: ${this.callSid}`);
                 
-                this.conferenceName = data.start?.customParameters?.conferenceName;
-                if( this.conferenceName ) {
-                    log.info(`\tConference name: ${this.conferenceName}`);
-                }
-                
-                log.info("JSON:", JSON.stringify(data, null, 2));                
-                break;            
+                // this.conferenceName = data.start?.customParameters?.conferenceName;
+                this.conferenceName = getValueOrDefault( data, "start.customParameters.conferenceName", "" );
+                log.info(`\tConference name: ${this.conferenceName}`);
+                break;
                 
             case "close":
                 log.info("Twilio: Close event received");
