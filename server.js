@@ -9,75 +9,75 @@ const DeepgramSTTService = require('./deepgramstt');
 require("dotenv").config();
 
 const scamPhrases_1 = [
-  { phrase: "hangup", type: "cmd" },
-  { phrase: "hang up", type: "cmd" },
-  { phrase: "hang on", type: "cmd" }, // Deepgram keeps mis-translating 'hang up' to 'hang on'
-  { phrase: "i love you", type: "match" },
-  { phrase: "soulmate", type: "match" },
-  { phrase: "meant to be", type: "match" },
-  { phrase: "help me", type: "match" },
-  { phrase: "money for a ticket", type: "match" },
-  { phrase: "urgent need", type: "match" },
-  { phrase: "wedding plans", type: "match" },
-  { phrase: "trust me", type: "match" },
-  { phrase: "send me gift cards", type: "match" },
-  { phrase: "i need your help", type: "match" },
-  { phrase: "guaranteed return", type: "match" },
-  { phrase: "risk free", type: "match" },
-  { phrase: "act fast", type: "match" },
-  { phrase: "limited time opportunity", type: "match" },
-  { phrase: "secure your future", type: "match" },
-  { phrase: "no risk", type: "match" },
-  { phrase: "double your money", type: "match" },
-  { phrase: "get rich quick", type: "match" },
-  { phrase: "investment portfolio", type: "match" },
-  { phrase: "exclusive deal", type: "match" },
-  { phrase: "debt forgiveness", type: "match" },
-  { phrase: "consolidate your loans", type: "match" },
-  { phrase: "low interest rate", type: "match" },
-  { phrase: "act now to reduce debt", type: "match" },
-  { phrase: "past due payment", type: "match" },
-  { phrase: "insurance claim overdue", type: "match" },
-  { phrase: "urgent action required", type: "match" },
-  { phrase: "policy cancellation", type: "match" },
-  { phrase: "pay to reactivate", type: "match" },
-  { phrase: "its me your grandson", type: "match" },
-  { phrase: "help me out of trouble", type: "match" },
-  { phrase: "i need bail money", type: "match" },
-  { phrase: "dont tell mom", type: "match" },
-  { phrase: "urgent family emergency", type: "match" },
-  { phrase: "send money immediately", type: "match" },
-  { phrase: "wire transfer needed", type: "match" },
-  { phrase: "im in danger", type: "match" },
-  { phrase: "please trust me", type: "match" },
-  { phrase: "youve won", type: "match" },
-  { phrase: "claim your prize", type: "match" },
-  { phrase: "pay a fee to collect", type: "match" },
-  { phrase: "cash transfer required", type: "match" },
-  { phrase: "congratulations youre the winner", type: "match" },
-  { phrase: "lottery winnings", type: "match" },
-  { phrase: "exclusive prize claim", type: "match" },
-  { phrase: "act fast to secure your prize", type: "match" },
-  { phrase: "winner notification", type: "match" },
-  { phrase: "your computer is at risk", type: "match" },
-  { phrase: "remote access required", type: "match" },
-  { phrase: "fix your account", type: "match" },
-  { phrase: "service renewal", type: "match" },
-  { phrase: "subscription fee", type: "match" },
-  { phrase: "update your device", type: "match" },
-  { phrase: "account locked", type: "match" },
-  { phrase: "technical problem detected", type: "match" },
-  { phrase: "call this number immediately", type: "match" },
-  { phrase: "tax debt", type: "match" },
-  { phrase: "unpaid taxes", type: "match" },
-  { phrase: "irs agent", type: "match" },
-  { phrase: "legal action required", type: "match" },
-  { phrase: "arrest warrant issued", type: "match" },
-  { phrase: "pay now to avoid penalties", type: "match" },
-  { phrase: "urgent tax resolution", type: "match" },
-  { phrase: "back taxes owed", type: "match" },
-  { phrase: "settlement fee", type: "match" },
-  { phrase: "tax relief services", type: "match" }
+    { phrase: "hangup", type: "cmd" },
+    { phrase: "hang up", type: "cmd" },
+    { phrase: "hang on", type: "cmd" }, // Deepgram keeps mis-translating 'hang up' to 'hang on'
+    { phrase: "i love you", type: "match" },
+    { phrase: "soulmate", type: "match" },
+    { phrase: "meant to be", type: "match" },
+    { phrase: "help me", type: "match" },
+    { phrase: "money for a ticket", type: "match" },
+    { phrase: "urgent need", type: "match" },
+    { phrase: "wedding plans", type: "match" },
+    { phrase: "trust me", type: "match" },
+    { phrase: "send me gift cards", type: "match" },
+    { phrase: "i need your help", type: "match" },
+    { phrase: "guaranteed return", type: "match" },
+    { phrase: "risk free", type: "match" },
+    { phrase: "act fast", type: "match" },
+    { phrase: "limited time opportunity", type: "match" },
+    { phrase: "secure your future", type: "match" },
+    { phrase: "no risk", type: "match" },
+    { phrase: "double your money", type: "match" },
+    { phrase: "get rich quick", type: "match" },
+    { phrase: "investment portfolio", type: "match" },
+    { phrase: "exclusive deal", type: "match" },
+    { phrase: "debt forgiveness", type: "match" },
+    { phrase: "consolidate your loans", type: "match" },
+    { phrase: "low interest rate", type: "match" },
+    { phrase: "act now to reduce debt", type: "match" },
+    { phrase: "past due payment", type: "match" },
+    { phrase: "insurance claim overdue", type: "match" },
+    { phrase: "urgent action required", type: "match" },
+    { phrase: "policy cancellation", type: "match" },
+    { phrase: "pay to reactivate", type: "match" },
+    { phrase: "its me your grandson", type: "match" },
+    { phrase: "help me out of trouble", type: "match" },
+    { phrase: "i need bail money", type: "match" },
+    { phrase: "dont tell mom", type: "match" },
+    { phrase: "urgent family emergency", type: "match" },
+    { phrase: "send money immediately", type: "match" },
+    { phrase: "wire transfer needed", type: "match" },
+    { phrase: "im in danger", type: "match" },
+    { phrase: "please trust me", type: "match" },
+    { phrase: "youve won", type: "match" },
+    { phrase: "claim your prize", type: "match" },
+    { phrase: "pay a fee to collect", type: "match" },
+    { phrase: "cash transfer required", type: "match" },
+    { phrase: "congratulations youre the winner", type: "match" },
+    { phrase: "lottery winnings", type: "match" },
+    { phrase: "exclusive prize claim", type: "match" },
+    { phrase: "act fast to secure your prize", type: "match" },
+    { phrase: "winner notification", type: "match" },
+    { phrase: "your computer is at risk", type: "match" },
+    { phrase: "remote access required", type: "match" },
+    { phrase: "fix your account", type: "match" },
+    { phrase: "service renewal", type: "match" },
+    { phrase: "subscription fee", type: "match" },
+    { phrase: "update your device", type: "match" },
+    { phrase: "account locked", type: "match" },
+    { phrase: "technical problem detected", type: "match" },
+    { phrase: "call this number immediately", type: "match" },
+    { phrase: "tax debt", type: "match" },
+    { phrase: "unpaid taxes", type: "match" },
+    { phrase: "irs agent", type: "match" },
+    { phrase: "legal action required", type: "match" },
+    { phrase: "arrest warrant issued", type: "match" },
+    { phrase: "pay now to avoid penalties", type: "match" },
+    { phrase: "urgent tax resolution", type: "match" },
+    { phrase: "back taxes owed", type: "match" },
+    { phrase: "settlement fee", type: "match" },
+    { phrase: "tax relief services", type: "match" }
 ];
 
 // Simplified logger
@@ -156,7 +156,7 @@ class CallSession {
         };
         
         // 4. ERROR RESILIENCE - Add maximum sizes and circuit breaker
-        this.MAX_BUFFER_SIZE = 30 * 1024; // 30 KB absolute maximum
+        this.MAX_BUFFER_SIZE = 32 * 1024;
         this.consecutiveErrors = { inbound: 0, outbound: 0 };
         this.MAX_CONSECUTIVE_ERRORS = 15;
         
@@ -175,6 +175,17 @@ class CallSession {
                 responseTimes: { inbound: [], outbound: [] }
             }
         };
+        
+        // 6. PREALLOC BUFFERS
+        this.audioAccumulator = {
+            inbound: Buffer.alloc(this.MAX_BUFFER_SIZE),
+            outbound: Buffer.alloc(this.MAX_BUFFER_SIZE)
+        };
+        
+        this.audioAccumulatorOffset = {
+            inbound: 0,
+            outbound: 0
+        };        
         
         this.transcriptHistory = {
             inbound: new TranscriptHistory( scamPhrases_1 ),
@@ -299,126 +310,115 @@ class CallSession {
         }, interval);
     }
     
+    accumulateAudio(buffer, track) {
+        // Get current offset
+        let currentOffset = this.audioAccumulatorOffset[track];
+        
+        // If there isn’t enough room for the new buffer, flush first.
+        if (currentOffset + buffer.length > this.MAX_BUFFER_SIZE) {
+            log.warn(`${track} accumulator full, flushing before appending new data`);
+            this.flushAudioBuffer(track);
+            currentOffset = this.audioAccumulatorOffset[track]; // Should be 0 after flush.
+        }
+        
+        // Copy the incoming buffer into the preallocated buffer at the current offset.
+        buffer.copy(this.audioAccumulator[track], currentOffset);
+        this.audioAccumulatorOffset[track] = currentOffset + buffer.length;
+        
+        // Track metrics, e.g., buffer growth, if needed:
+        this.metrics.bufferGrowth[track].push(buffer.length);
+        
+        // Adjust the threshold based on processing time as before...
+        const processingTime = this.lastProcessingTime[track];
+        if (processingTime > 0) {
+            if (processingTime < 10) {
+                this.bufferSizeThreshold[track] = Math.max(1024, this.bufferSizeThreshold[track] - 128);
+            } else if (processingTime > 50) {
+                this.bufferSizeThreshold[track] = Math.min(8 * 1024, this.bufferSizeThreshold[track] + 256);
+            }
+        }
+        
+        // Flush if threshold exceeded.
+        if (this.audioAccumulatorOffset[track] >= this.bufferSizeThreshold[track]) {
+            this.flushAudioBuffer(track);
+            return;
+        }
+        
+        // Start the flush timer if not already running.
+        if (!this.flushTimer[track]) {
+            this.startFlushTimer(track);
+        }
+    }    
+    
     flushAudioBuffer(track) {
+        // Stop any existing flush timer.
         this.stopFlushTimer(track);
         
-        const totalBytes = this.audioAccumulatorSize[track];
-        
-        if ( totalBytes > 0) {
-      		// Cache properties locally to minimize repeated lookups
-      		const buffers = this.audioAccumulator[track];
-      		const sttService = this.sttService[track];
-      		const deepgramMetrics = this.metrics.deepgram;
-      		const currentTime = Date.now();
-        
-            // 5. PERFORMANCE MONITORING - Record start time
-			this.processingStartTime[track] = currentTime;                        
-            
-            const combinedBuffer = Buffer.concat(buffers);
+        const currentOffset = this.audioAccumulatorOffset[track];
+        if (currentOffset > 0) {
+            // Slice the preallocated buffer from 0 to the current offset.
+            const combinedBuffer = this.audioAccumulator[track].slice(0, currentOffset);
             const bufferSize = combinedBuffer.length;
+            const sttService = this.sttService[track];
+            const deepgramMetrics = this.metrics.deepgram;
+            const currentTime = Date.now();
+            
+            // Record processing start time.
+            this.processingStartTime[track] = currentTime;
             
             try {
                 if (sttService && sttService.connected) {
-                    // Track bytes before sending
                     const timeSinceLastSend = currentTime - deepgramMetrics.lastSendTime[track];
                     
-                    // Send data to Deepgram
+                    // Send the pre-sliced buffer.
                     sttService.send(combinedBuffer);
                     
-                    // Update Deepgram metrics
                     deepgramMetrics.bytesSent[track] += bufferSize;
                     deepgramMetrics.packetsSent[track]++;
                     
-                    // Calculate send rate in bytes per second
                     if (timeSinceLastSend > 0) {
                         const sendRate = bufferSize / (timeSinceLastSend / 1000);
                         deepgramMetrics.sendRates[track].push(sendRate);
                     }
                     deepgramMetrics.lastSendTime[track] = currentTime;
                     
-                    // 4. ERROR RESILIENCE - Reset error counter on success
+                    // Reset error counter.
                     this.consecutiveErrors[track] = 0;
                 } else {
-                    log.warn(`STT service not connected for ${track} track, buffering ${this.audioAccumulatorSize[track]} audio bytes`);
-                    log.warn(`            accumulated buffer size: ${bufferSize}`);
-                    if( bufferSize > 64*1024 ) {
-                    	this.consecutiveErrors[track]++; // Deepgram not keeping up?
+                    log.warn(`STT service not connected for ${track} track, buffered ${currentOffset} bytes`);
+                    if (bufferSize > 64 * 1024) {
+                        this.consecutiveErrors[track]++;
                     }
                 }
             } catch (error) {
                 log.error(`Error sending ${track} audio to Deepgram`, error);
                 this.consecutiveErrors[track]++;
             } finally {
-                // 4. ERROR RESILIENCE - Always clear the buffer
-                this.audioAccumulator[track] = [];
-                this.audioAccumulatorSize[track] = 0;
+                // Reset the offset to 0 – no need to create a new Buffer.
+                this.audioAccumulatorOffset[track] = 0;
                 
-                // 5. PERFORMANCE MONITORING - Record processing time
                 const processingTime = Date.now() - this.processingStartTime[track];
                 this.lastProcessingTime[track] = processingTime;
                 this.metrics.processingTimes[track].push(processingTime);
-                
-                // Track Deepgram response time
                 this.metrics.deepgram.responseTimes[track].push(processingTime);
             }
             
-            // 4. ERROR RESILIENCE - Implement circuit breaker
             if (this.consecutiveErrors[track] >= this.MAX_CONSECUTIVE_ERRORS) {
                 log.error(`Circuit breaker triggered for ${track} track after ${this.consecutiveErrors[track]} errors`);
-                // Attempt to reconnect the STT service
                 if (sttService) {
                     sttService.cleanup();
                     this.sttService[track] = new DeepgramSTTService(
-                        this.services.config.deepgram,
-                        (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
-                        (utterance) => this._handleUtteranceEnd(utterance, track)
-                    );
-				}
+                                                                    this.services.config.deepgram,
+                                                                    (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
+                                                                    (utterance) => this._handleUtteranceEnd(utterance, track)
+                                                                    );
+                }
                 this.consecutiveErrors[track] = 0;
             }
         }
         
-        // 3. IMPROVED TIMER LOGIC - Only restart if we're still active
+        // Restart flush timer if session is still active.
         if (this.active && !this.isShuttingDown) {
-            this.startFlushTimer(track);
-        }
-    }
-    
-    accumulateAudio(buffer, track) {
-        this.audioAccumulator[track].push(buffer);
-        this.audioAccumulatorSize[track] += buffer.length;
-        
-        const accumBytes = this.audioAccumulatorSize[track];
-        
-        // 5. PERFORMANCE MONITORING - Track buffer growth
-        this.metrics.bufferGrowth[track].push(buffer.length);
-        
-        // 2. ADAPTIVE BUFFER MANAGEMENT - Adjust threshold based on processing time
-        const processingTime = this.lastProcessingTime[track];
-        if (processingTime > 0) {
-            // If processing is fast, we can use smaller buffers
-            if (processingTime < 10) {
-                this.bufferSizeThreshold[track] = Math.max(1024, this.bufferSizeThreshold[track] - 128);
-            } 
-            // If processing is slow, use larger buffers to reduce overhead
-            else if (processingTime > 50) {
-                this.bufferSizeThreshold[track] = Math.min(8 * 1024, this.bufferSizeThreshold[track] + 256);
-            }
-        }
-        
-        // 4. ERROR RESILIENCE - Enforce maximum buffer size
-        if (accumBytes >= this.MAX_BUFFER_SIZE) {
-            log.warn(`${track} buffer exceeded maximum size (${this.MAX_BUFFER_SIZE} bytes), flushing immediately`);
-            this.flushAudioBuffer(track);
-            return;
-        }
-        
-        if (accumBytes >= this.bufferSizeThreshold[track]) {
-            this.flushAudioBuffer(track);
-            return;
-        }
-        
-        if (!this.flushTimer[track]) {
             this.startFlushTimer(track);
         }
     }
