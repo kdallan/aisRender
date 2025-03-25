@@ -6,7 +6,6 @@ const TranscriptHistory = require( "./transcripthistory" );
 const { addParticipant, TwilioService } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
-const FastJsonParse = require('fast-json-parse');
 
 
 require("dotenv").config();
@@ -434,9 +433,9 @@ class CallSession {
         try {
             // Parse message into JSON
             if (Buffer.isBuffer(message)) {
-                data = FastJsonParse(message.toString("utf8"));
+                data = JSON.parse(message.toString("utf8"));
             } else if (typeof message === "string") {
-                data = FastJsonParse(message);
+                data = JSON.parse(message);
             } else {
                 return;
             }
