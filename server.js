@@ -433,11 +433,17 @@ class CallSession {
     _handleMessage(message) {
         if (!this.active) return;
         
-        console.log( "msg: " + typeof message);
-        
         let data;
         try {
-            const data = simdjson.parse( message );
+        
+            // Parse message into JSON
+            if (Buffer.isBuffer(message)) {
+                data = simdjson.parse( message.toString("utf8") );
+            } else if (typeof message === "string") {
+                data = simdjson.parse( message );
+            } else {
+                return;
+            }        
             
             // Process by event type
             switch (data.event) {
