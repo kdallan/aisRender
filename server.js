@@ -126,6 +126,7 @@ const config = (() => {
     };
 })();
 
+// Helper function for simdjson lazyParse
 function getValueOrDefault( parsedDoc, path, defaultValue ) {
     try {
         return parsedDoc.valueForKeyPath( path );
@@ -472,9 +473,8 @@ class CallSession {
         if (!this.active) return;
         
         let data;
-        try {
-        
-            // Parse message into JSON
+        try {        
+            // Lazy parse message into JSON - big win on speed using lazyParse
             if (Buffer.isBuffer(message)) {
                 data = simdjson.lazyParse( message.toString("utf8") );
             } else if (typeof message === "string") {
@@ -487,43 +487,44 @@ class CallSession {
             
             // Process by event type
             switch (event) {
-            case "media": {
+            case "media":
+            	let buf = this.decodeBuffer;
                 this.receivedPackets++;
                 
                 let payload = data.valueForKeyPath( "media.payload" ); // Not optional
                 let track = data.valueForKeyPath( "media.track" ); // Not optional
                 
                 if (track === "inbound" || track === "outbound") {
-                    this.inboundPackets++; // Assuming both increment the same counter.
-                    
-                    const bytesWritten = this.decodeBuffer.write( payload, 0, "base64" );
-                    const audioBuffer = this.decodeBuffer.slice( 0, bytesWritten );
+                    this.inboundPackets++;
+
+					// Cached buffer to reduce memory allocation                    
+                    const bytesWritten = buf.write( payload, 0, "base64" );
+                    const audioBuffer = buf.slice( 0, bytesWritten );
                     this.accumulateAudio( audioBuffer, track );
                 }
                 break;
-            }
             
             case "connected":
-                log.info("Twilio: Connected event received");
+                log.info( "Twilio: Connected event received" );
                 break;
                 
             case "start":
         		// this.callSid = data.start?.callSid || data.callSid;
                 this.callSid = getValueOrDefault( data, "start.callSid", null ); // Optional
-                log.info(`Twilio: Call started, SID: ${this.callSid}`);
+                log.info( `Twilio: Call started, SID: ${this.callSid}` );
                 
                 // this.conferenceName = data.start?.customParameters?.conferenceName;
                 this.conferenceName = getValueOrDefault( data, "start.customParameters.conferenceName", "" ); // Optional
-                log.info(`\tConference name: ${this.conferenceName}`);
+                log.info( `\tConference name: ${this.conferenceName}` );
                 break;
                 
             case "close":
-                log.info("Twilio: Close event received");
+                log.info( "Twilio: Close event received" );
                 this._cleanup();
                 break;
             }
         } catch (error) {
-            log.error("Error processing message", error);
+            log.error( "Error processing message", error );
         }
     }
     
@@ -533,7 +534,7 @@ class CallSession {
         
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
         
-        const history = this.transcriptHistory[ track ];        
+        const history = this.transcriptHistory[ track ];
         history.push( transcript );
         
         let hit = history.findScamPhrases();
@@ -552,14 +553,11 @@ class CallSession {
         if (!this.active || !this.callSid || this.hangupInitiated) return;
         
         try {
-            
             this.hangupInitiated = true;
             log.info(`Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ""}`);
             
             await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
-            
         } catch (error) {
-            
             log.error("Failed to hang up call", error);
         }
     }
@@ -578,19 +576,17 @@ class CallSession {
                 log.info(`Final Deepgram stats for call ${this.callSid || 'unknown'}:`);
                 this.logDeepgramStats();
             }
+            
+        	this.stopStatsTimer();            
         }
         
         this.active = false;
         this.hangupInitiated = false;
         this.isShuttingDown = true;
         
-        this.stopStatsTimer();
-        
-        // Stop flush timers for both tracks
         this.stopFlushTimer('inbound');
         this.stopFlushTimer('outbound');
         
-        // Clean up services for both tracks
         if (this.sttService && this.sttService.inbound) {
             this.sttService.inbound.cleanup();
             this.sttService.inbound = null;

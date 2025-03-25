@@ -1,13 +1,13 @@
+'use strict';
 const AhoCorasick = require('./ahocorasick');
 
-// Precompile regex patterns to avoid re-creating them on every call.
-const NON_ALPHANUM = /[^a-z0-9\s]/g;
-const WHITESPACE = /\s+/g;
+// Single regex to replace any non-alphanumeric sequence (excluding numbers) with a space.
+const CLEAN_REGEX = /[^a-z0-9]+/g;
 
 /**
- * Creates a scam phrase detector using the Aho-Corasick algorithm
- * @param {Object[]} phrases - Array of objects with a `phrase` property.
- * @returns {Object} - Detector with methods to check text.
+ * Creates a scam phrase detector using the Aho-Corasick algorithm.
+ * @param {Object[]} phrases - Each object must have a `phrase` property.
+ * @returns {Object} - Detector with two methods: containsScamPhrase and findScamPhrases.
  */
 function createScamDetector(phrases) {
   const ac = new AhoCorasick(phrases);
@@ -20,29 +20,37 @@ function createScamDetector(phrases) {
 class TranscriptHistory {
   constructor(phrases) {
     this.finder = createScamDetector(phrases);
-    // Compute maximum words from phrases. We assume each element has a 'phrase' property.
+    // Determine the maximum number of words needed based on the longest phrase.
     this.maxWords = Math.max(1, this._longestPhraseInWords(phrases));
-    this.buffer = [];
+    // Set up a circular buffer to avoid costly shift() calls.
+    this.buffer = new Array(this.maxWords);
+    this.start = 0; // Points to the oldest element.
+    this.size = 0;  // Number of words currently stored.
   }
 
   /**
-   * Pushes new transcript text into the rolling buffer.
-   * @param {string} transcript 
+   * Pushes new transcript text into the rolling circular buffer.
+   * @param {string} transcript
    */
   push(transcript) {
-    // Normalize and clean the text in one pass.
-    let cleaned = transcript.toLowerCase().replace(NON_ALPHANUM, '').replace(WHITESPACE, ' ').trim();
+    if (!transcript) return;
+    // Clean and normalize in one pass: lowercase, collapse non-alphanumerics to a space, trim.
+    const cleaned = transcript.toLowerCase().replace(CLEAN_REGEX, ' ').trim();
     if (!cleaned) return;
 
-    // Split into words.
+    // Split cleaned text on whitespace.
     const words = cleaned.split(' ');
-    // Use push.apply for efficiency if words array is large.
-    this.buffer.push(...words);
-
-    // Remove older words until buffer length does not exceed maxWords.
-    // Using while-loop avoids creating a new array.
-    while (this.buffer.length > this.maxWords) {
-      this.buffer.shift();
+    for (let i = 0, len = words.length; i < len; i++) {
+      const word = words[i];
+      if (this.size < this.maxWords) {
+        // Append to the end.
+        this.buffer[(this.start + this.size) % this.maxWords] = word;
+        this.size++;
+      } else {
+        // Buffer full: overwrite the oldest word and advance the start pointer.
+        this.buffer[this.start] = word;
+        this.start = (this.start + 1) % this.maxWords;
+      }
     }
   }
 
@@ -51,35 +59,46 @@ class TranscriptHistory {
    * @returns {boolean}
    */
   findScamPhrases() {
-    if (!this.buffer.length) return false;
-    // Join the buffer into a string only when needed.
-    const flat = this.buffer.join(' ');
+    if (this.size === 0) return false;
+    // Reconstruct the current text from the circular buffer.
+    const words = new Array(this.size);
+    for (let i = 0; i < this.size; i++) {
+      words[i] = this.buffer[(this.start + i) % this.maxWords];
+    }
+    const flat = words.join(' ');
     return this.finder.containsScamPhrase(flat);
   }
 
   /**
    * Returns a flattened string of the last `numWordsBack` words.
-   * @param {number} numWordsBack 
+   * If numWordsBack is <= 0, returns only the last word.
+   * @param {number} numWordsBack
    * @returns {string}
    */
   flatten(numWordsBack) {
-    const len = this.buffer.length;
-    if (!len) return '';
-    if (numWordsBack <= 0) return this.buffer[len - 1];
-    const startIndex = len - numWordsBack;
-    return this.buffer.slice(startIndex < 0 ? 0 : startIndex).join(' ');
+    if (this.size === 0) return '';
+    if (numWordsBack <= 0) {
+      return this.buffer[(this.start + this.size - 1) % this.maxWords];
+    }
+    const count = numWordsBack < this.size ? numWordsBack : this.size;
+    const result = new Array(count);
+    // Collect the last `count` words from the circular buffer.
+    for (let i = 0; i < count; i++) {
+      result[i] = this.buffer[(this.start + this.size - count + i) % this.maxWords];
+    }
+    return result.join(' ');
   }
 
   /**
-   * Returns the length in words of the longest phrase.
-   * @param {Object[]} phrases 
+   * Computes the maximum number of words in any phrase.
+   * @param {Object[]} phrases
    * @returns {number}
    */
   _longestPhraseInWords(phrases) {
     let max = 0;
     for (let i = 0, len = phrases.length; i < len; i++) {
-      // Cache trimmed string and split once.
-      const count = phrases[i].phrase.trim().split(WHITESPACE).length;
+      // Trim once and split on whitespace.
+      const count = phrases[i].phrase.trim().split(/\s+/).length;
       if (count > max) max = count;
     }
     return max;

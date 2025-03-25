@@ -1,174 +1,200 @@
-const AHO_NODE_SIZE = 27; // Constant for node children count
+'use strict';
+
+const AHO_NODE_SIZE = 27; // 26 letters + space
 
 function createNode() {
-  return {
-    goto: new Array(AHO_NODE_SIZE).fill(null),
-    fail: null,
-    output: []
-  };
-}
-
-function charToIndex(c) {
-  return (c === ' ') ? 26 : (c.charCodeAt(0) - 97);
+    // Defer creation of output array until actually needed to reduce memory overhead.
+    return {
+        goto: new Array(AHO_NODE_SIZE).fill(null),
+        fail: null,
+        output: null
+    };
 }
 
 class AhoCorasick {
-  /**
-   * Build an Aho–Corasick automaton from an array of phrase objects.
-   * Each object should have at least `phrase` and `type` properties.
-   * @param {{phrase: string, type: string, command?: object}[]} phrases
-   */
-  constructor(phrases) {
-    // Filter and normalize phrases.
-    this.phrases = [];
-    this.patternLengths = [];
-    for (let i = 0, len = phrases.length; i < len; i++) {
-      const p = phrases[i];
-      const norm = p.phrase.trim();
-      if (norm.length) {
-        // Copy the object and replace phrase with normalized version.
-        this.phrases.push({ ...p, phrase: norm });
-        this.patternLengths.push(norm.length);
-      }
-    }
-
-    // Create root node.
-    this.root = createNode();
-
-    // Build trie.
-    this.buildGotoFunction();
-    // Build failure links and merge outputs.
-    this.buildFailureAndOutputFunctions();
-  }
-
-  buildGotoFunction() {
-    const phrases = this.phrases;
-    const root = this.root;
-    const ALPHA_SIZE = AHO_NODE_SIZE;
-
-    for (let i = 0, pLen = phrases.length; i < pLen; i++) {
-      let current = root;
-      const pattern = phrases[i].phrase;
-      const patLen = pattern.length;
-      for (let j = 0; j < patLen; j++) {
-        const idx = charToIndex(pattern[j]);
-        if (current.goto[idx] === null) {
-          current.goto[idx] = createNode();
+    /**
+     * Build an Aho–Corasick automaton from an array of phrase objects.
+     * Each object should have at least `phrase` and `type` properties.
+     * @param {{phrase: string, type: string, command?: object}[]} phrases
+     */
+    constructor(phrases) {
+        // Preprocess and normalize phrases.
+        const normalized = [];
+        for (let i = 0; i < phrases.length; i++) {
+            const p = phrases[i];
+            const norm = p.phrase.trim();
+            if (norm) {
+                // Keep the entire object but with trimmed phrase.
+                normalized.push({
+                    ...p,
+                    phrase: norm
+                });
+            }
         }
-        current = current.goto[idx];
-      }
-      // Mark the end of the pattern.
-      current.output.push(i);
+        this.phrases = normalized;
+        
+        // Create root node.
+        const root = createNode();
+        this.root = root;
+        
+        // Build the trie (goto function).
+        this.buildGotoFunction();
+        
+        // Build failure links + merge outputs.
+        this.buildFailureAndOutputFunctions();
     }
-  }
-
-  buildFailureAndOutputFunctions() {
-    const root = this.root;
-    root.fail = root;
-    const ALPHA_SIZE = AHO_NODE_SIZE;
-    const queue = [];
-    let head = 0, tail = 0;
-
-    // Initialize queue with root's direct children.
-    for (let i = 0; i < ALPHA_SIZE; i++) {
-      const child = root.goto[i];
-      if (child !== null) {
-        child.fail = root;
-        queue[tail++] = child;
-      }
-    }
-
-    // Process the queue with BFS.
-    while (head < tail) {
-      const current = queue[head++];
-      for (let i = 0; i < ALPHA_SIZE; i++) {
-        const child = current.goto[i];
-        if (child === null) continue;
-        queue[tail++] = child;
-
-        let failState = current.fail;
-        while (failState !== root && failState.goto[i] === null) {
-          failState = failState.fail;
+    
+    buildGotoFunction() {
+        const root = this.root;
+        const phrases = this.phrases;
+        // Inline charToIndex to avoid repeated function calls:
+        // (c === ' ') ? 26 : (c.charCodeAt(0) - 97)
+        
+        for (let i = 0; i < phrases.length; i++) {
+            let current = root;
+            const pattern = phrases[i].phrase;
+            for (let j = 0; j < pattern.length; j++) {
+                const c = pattern[j];
+                const idx = (c === ' ') ? 26 : (c.charCodeAt(0) - 97);
+                
+                let nextNode = current.goto[idx];
+                if (nextNode === null) {
+                    nextNode = createNode();
+                    current.goto[idx] = nextNode;
+                }
+                current = nextNode;
+            }
+            // Instead of storing an index, store the phrase object directly in output.
+            if (!current.output) {
+                current.output = [phrases[i]];
+            } else {
+                current.output.push(phrases[i]);
+            }
         }
-        child.fail = failState.goto[i] || root;
-
-        // Merge output from the fail state.
-        if (child.fail.output.length) {
-          child.output.push(...child.fail.output);
+    }
+    
+    buildFailureAndOutputFunctions() {
+        const root = this.root;
+        root.fail = root;
+        
+        // BFS queue to build fail links
+        const queue = [];
+        let head = 0, tail = 0;
+        
+        // Init queue with all immediate children of root
+        for (let i = 0; i < AHO_NODE_SIZE; i++) {
+            const child = root.goto[i];
+            if (child) {
+                child.fail = root;
+                queue[tail++] = child;
+            } else {
+                // Optional: for speed, link back to root when there's no child
+                // so we skip some checks later
+                root.goto[i] = root;
+            }
         }
-      }
-    }
-  }
-
-  /**
-   * Return an array of all pattern matches in the given text.
-   * Each match is returned as a JSON object with its meta-data.
-   * @param {string} text  // text should be normalized: lower-case and [a-z ] only.
-   * @returns {Array<{phrase: string, type: string, [command]?: object}>}
-   */
-  search(text) {
-    if (!text) return [];
-    const matches = [];
-    const root = this.root;
-    const phrases = this.phrases;
-    const patLens = this.patternLengths;
-    let current = root;
-    const len = text.length;
-    for (let i = 0; i < len; i++) {
-      const idx = charToIndex(text[i]);
-      while (current !== root && current.goto[idx] === null) {
-        current = current.fail;
-      }
-      current = current.goto[idx] || current;
-      if (current.output.length) {
-        const outputs = current.output;
-        for (let k = 0, outLen = outputs.length; k < outLen; k++) {
-          const pi = outputs[k];
-          // We could use patLens[pi] if needed, but not used in this return.
-          const pObj = phrases[pi];
-          matches.push({
-            phrase: pObj.phrase,
-            type: pObj.type,
-            ...(pObj.command && { command: pObj.command })
-          });
+        
+        while (head < tail) {
+            const current = queue[head++];
+            
+            for (let i = 0; i < AHO_NODE_SIZE; i++) {
+                let child = current.goto[i];
+                if (!child) {
+                    // If there's no child for this symbol, redirect to fail's child.
+                    current.goto[i] = current.fail.goto[i];
+                    continue;
+                }
+                
+                queue[tail++] = child;
+                
+                // Find fail state
+                let failState = current.fail;
+                while (!failState.goto[i]) {
+                    failState = failState.fail;
+                }
+                child.fail = failState.goto[i];
+                
+                // Merge output from the fail state
+                if (child.fail.output) {
+                    if (!child.output) {
+                        child.output = child.fail.output.slice();
+                    } else {
+                        child.output.push(...child.fail.output);
+                    }
+                }
+            }
         }
-      }
     }
-    return matches;
-  }
-
-  /**
-   * Return a JSON object for the first found pattern match in the given text.
-   * If no match is found, returns undefined.
-   * The text is guaranteed to contain only [a-z ].
-   * @param {string} text
-   * @returns {{ phrase: string, type: string, [command]?: object } | undefined}
-   */
-  containsAny(text) {
-    if (!text) return null;
-    const root = this.root;
-    const phrases = this.phrases;
-    const patLens = this.patternLengths;
-    let current = root;
-    const len = text.length;
-    for (let i = 0; i < len; i++) {
-      const idx = charToIndex(text[i]);
-      while (current !== root && current.goto[idx] === null) {
-        current = current.fail;
-      }
-      current = current.goto[idx] || current;
-      if (current.output.length) {
-        const pi = current.output[0];
-        const pObj = phrases[pi];
-        return {
-          phrase: pObj.phrase,
-          type: pObj.type,
-          ...(pObj.command && { command: pObj.command })
-        };
-      }
+    
+    /**
+     * Return an array of all pattern matches in the given text.
+     * Each match is returned as a JSON object with its meta-data.
+     * @param {string} text  // text should be normalized: lower-case and [a-z ] only.
+     * @returns {Array<{phrase: string, type: string, [command]?: object}>}
+     */
+    search(text) {
+        if (!text) return [];
+        const matches = [];
+        const root = this.root;
+        let current = root;
+        
+        for (let i = 0; i < text.length; i++) {
+            const c = text[i];
+            const idx = (c === ' ') ? 26 : (c.charCodeAt(0) - 97);
+            
+            // Follow fail links until we find a valid goto
+            while (!current.goto[idx]) {
+                current = current.fail;
+            }
+            current = current.goto[idx];
+            
+            if (current.output) {
+                // Gather outputs
+                const out = current.output;
+                for (let k = 0; k < out.length; k++) {
+                    matches.push({
+                        phrase: out[k].phrase,
+                        type: out[k].type,
+                        ...(out[k].command && { command: out[k].command })
+                    });
+                }
+            }
+        }
+        return matches;
     }
-    return null;
-  }
+    
+    /**
+     * Return the first found pattern match (or null) in the given text.
+     * The text is guaranteed to contain only [a-z ].
+     * @param {string} text
+     * @returns {{ phrase: string, type: string, [command]?: object } | null}
+     */
+    containsAny(text) {
+        if (!text) return null;
+        const root = this.root;
+        let current = root;
+        
+        for (let i = 0; i < text.length; i++) {
+            const c = text[i];
+            const idx = (c === ' ') ? 26 : (c.charCodeAt(0) - 97);
+            
+            while (!current.goto[idx]) {
+                current = current.fail;
+            }
+            current = current.goto[idx];
+            
+            if (current.output) {
+                // Return the first match immediately
+                const found = current.output[0];
+                return {
+                    phrase: found.phrase,
+                    type: found.type,
+                    ...(found.command && { command: found.command })
+                };
+            }
+        }
+        return null;
+    }
 }
 
 module.exports = AhoCorasick;
