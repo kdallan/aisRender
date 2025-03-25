@@ -68,6 +68,8 @@ class DeepgramSTTService {
     }
     
     _setupEventListeners() {
+    	if( !this.deepgram ) return;
+        
         // Open event
         this.deepgram.addListener(LiveTranscriptionEvents.Open, () => {
             log.info("Deepgram STT connection opened");
