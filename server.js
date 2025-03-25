@@ -118,7 +118,7 @@ const config = (() => {
                 channels: 1,
                 no_delay: true,
                 interim_results: true,
-                endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 4,
+                endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 5,
                 utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
             },
             throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 20
@@ -197,15 +197,15 @@ class CallSession {
         // Initialize STT services - one for each track
         this.sttService = {
             inbound: new DeepgramSTTService(
-                this.services.config.deepgram,
-                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'inbound'),
-                (utterance) => this._handleUtteranceEnd(utterance, 'inbound')
-            ),
+                                            this.services.config.deepgram,
+                                            (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'inbound'),
+                                            (utterance) => this._handleUtteranceEnd(utterance, 'inbound')
+                                            ),
             outbound: new DeepgramSTTService(
-                 this.services.config.deepgram,
-                 (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'outbound'),
-                 (utterance) => this._handleUtteranceEnd(utterance, 'outbound')
-            )
+                                             this.services.config.deepgram,
+                                             (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'outbound'),
+                                             (utterance) => this._handleUtteranceEnd(utterance, 'outbound')
+                                             )
         };
         
         // Setup WebSocket handlers
@@ -432,17 +432,47 @@ class CallSession {
         
         let data;
         try {
-            // Parse message into JSON
-            if (Buffer.isBuffer(message)) {
-                data = JSON.parse(message.toString("utf8"));
-            } else if (typeof message === "string") {
-                data = JSON.parse(message);
-            } else {
-                return;
-            }
+            // Convert the message to a string if it's a Buffer, otherwise use it directly.
+            const jsonStr = Buffer.isBuffer(message)
+              ? message.toString('utf8')
+              : (typeof message === 'string' ? message : null);
+
+            // If we don't have a valid JSON string, exit early.
+            if (jsonStr === null) return;
+
+            const data = JSON.parse(jsonStr);
             
             // Process by event type
             switch (data.event) {
+            case "media": {
+                this.receivedPackets++;
+                
+                // Handle first media event.
+                if (!this.hasSeenMedia) {
+                    this.hasSeenMedia = true;
+                    log.info("Twilio: First media event received");
+                }
+                
+                // Set stream SID if not already set.
+                if (!this.streamSid && data.streamSid) {
+                    this.streamSid = data.streamSid;
+                    log.info(`Twilio: Stream SID: ${this.streamSid}`);
+                }
+                
+                // Process media payload if it exists.
+                const { media } = data;
+                if (media && media.payload) {
+                    const { payload, track } = media;
+                    // Only process inbound or outbound tracks.
+                    if (track === "inbound" || track === "outbound") {
+                        this.inboundPackets++; // Assuming both increment the same counter.
+                        // Create raw audio buffer and accumulate it.
+                        this.accumulateAudio(Buffer.from(payload, "base64"), track);
+                    }
+                }
+                break;
+            }
+            
             case "connected":
                 log.info("Twilio: Connected event received");
                 break;
@@ -459,36 +489,7 @@ class CallSession {
                 }
                 
                 log.info("JSON:", JSON.stringify(data, null, 2));                
-                break;
-                
-            case "media":
-                this.receivedPackets++;
-                
-                // Handle first media packet
-                if (!this.hasSeenMedia) {
-                    this.hasSeenMedia = true;
-                    log.info("Twilio: First media event received");
-                }
-                
-                // Track stream SID
-                if (!this.streamSid && data.streamSid) {
-                    this.streamSid = data.streamSid;
-                    log.info(`Twilio: Stream SID: ${this.streamSid}`);
-                }
-                
-                // Process audio payload
-                if (data.media?.payload) {
-                    // 1. SEPARATE TRACK PROCESSING - Handle tracks separately
-                    if (data.media.track === "inbound" || data.media.track === "outbound") {
-                        this.inboundPackets++;
-                        const payload = data.media.payload;
-                        const track = data.media.track;
-                        
-                        const rawAudio = Buffer.from(payload, "base64");
-                        this.accumulateAudio(rawAudio, track);
-                    }
-                }
-                break;
+                break;            
                 
             case "close":
                 log.info("Twilio: Close event received");
