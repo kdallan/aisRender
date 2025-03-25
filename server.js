@@ -545,10 +545,10 @@ class CallSession {
     }
     
     _clearAllTimers() {
-		stopMemoryMonitor();
-		stopStatsTimer();
-  		stopFlushTimer( 'inbound' );
-    	stopFlushTimer( 'outbound' );
+		this.stopMemoryMonitor();
+		this.stopStatsTimer();
+  		this.stopFlushTimer( 'inbound' );
+    	this.stopFlushTimer( 'outbound' );
     }    
     
     _cleanup() {
@@ -598,7 +598,7 @@ class VoiceServer {
             /* Options */
             compression: uWS.DISABLED,
             maxPayloadLength: 32 * 1024,
-            idleTimeout: 120,
+            idleTimeout: 300,
             maxBackpressure: 1 * 1024 * 1024,
 
             /* Handlers */
