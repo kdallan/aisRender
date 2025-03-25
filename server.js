@@ -6,7 +6,6 @@ const TranscriptHistory = require( "./transcripthistory" );
 const { addParticipant, TwilioService } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
-const FastJsonParse = require('fast-json-parse');
 
 
 require("dotenv").config();
@@ -314,138 +313,133 @@ class CallSession {
     }
     
     accumulateAudio(buffer, track) {
-        // Get current offset
-        let currentOffset = this.audioAccumulatorOffset[track];
+        // Cache frequently accessed values.
+        const bufLen = buffer.length;
+        let offset = this.audioAccumulatorOffset[track];
+        const maxSize = this.MAX_BUFFER_SIZE;
+        const accumulator = this.audioAccumulator[track];
+        const growthMetric = this.metrics.bufferGrowth[track];
         
-        // If there isn’t enough room for the new buffer, flush first.
-        if (currentOffset + buffer.length > this.MAX_BUFFER_SIZE) {
+        // If the new data would exceed the maximum buffer size, flush immediately.
+        if (offset + bufLen > maxSize) {
             log.warn(`${track} accumulator full, flushing before appending new data`);
             this.flushAudioBuffer(track);
-            currentOffset = this.audioAccumulatorOffset[track]; // Should be 0 after flush.
+            offset = this.audioAccumulatorOffset[track]; // Should be reset (usually 0) after flush.
         }
         
-        // Copy the incoming buffer into the preallocated buffer at the current offset.
-        buffer.copy(this.audioAccumulator[track], currentOffset);
-        this.audioAccumulatorOffset[track] = currentOffset + buffer.length;
+        // Copy the incoming data into the preallocated buffer.
+        buffer.copy(accumulator, offset);
+        offset += bufLen;
+        this.audioAccumulatorOffset[track] = offset;
         
-        // Track metrics, e.g., buffer growth, if needed:
-        this.metrics.bufferGrowth[track].push(buffer.length);
+        // Record buffer growth.
+        growthMetric.push(bufLen);
         
-        // Adjust the threshold based on processing time as before...
-        const processingTime = this.lastProcessingTime[track];
-        if (processingTime > 0) {
-            if (processingTime < 10) {
+        // Adjust the flush threshold based on previous processing time.
+        const pTime = this.lastProcessingTime[track];
+        if (pTime > 0) {
+            if (pTime < 10) {
                 this.bufferSizeThreshold[track] = Math.max(1024, this.bufferSizeThreshold[track] - 128);
-            } else if (processingTime > 50) {
+            } else if (pTime > 50) {
                 this.bufferSizeThreshold[track] = Math.min(8 * 1024, this.bufferSizeThreshold[track] + 256);
             }
         }
         
-        // Flush if threshold exceeded.
-        if (this.audioAccumulatorOffset[track] >= this.bufferSizeThreshold[track]) {
+        // Flush immediately if the current offset exceeds the dynamic threshold.
+        if (offset >= this.bufferSizeThreshold[track]) {
             this.flushAudioBuffer(track);
             return;
         }
         
-        // Start the flush timer if not already running.
+        // If no flush timer is active, start one.
         if (!this.flushTimer[track]) {
             this.startFlushTimer(track);
         }
-    }    
+    }
     
     flushAudioBuffer(track) {
-        // Stop any existing flush timer.
+        // Immediately stop any running flush timer.
         this.stopFlushTimer(track);
         
-        const currentOffset = this.audioAccumulatorOffset[track];
-        if (currentOffset > 0) {
-            // Slice the preallocated buffer from 0 to the current offset.
-            const combinedBuffer = this.audioAccumulator[track].slice(0, currentOffset);
+        const offset = this.audioAccumulatorOffset[track];
+        if (offset > 0) {
+            // Cache frequently used variables locally.
+            const accumulator = this.audioAccumulator[track];
+            const combinedBuffer = accumulator.slice(0, offset);
             const bufferSize = combinedBuffer.length;
             const sttService = this.sttService[track];
             const deepgramMetrics = this.metrics.deepgram;
-            const currentTime = performance.now();
-            
-            // Record processing start time.
-            this.processingStartTime[track] = currentTime;
+            const now = performance.now();
+            this.processingStartTime[track] = now;
             
             try {
                 if (sttService && sttService.connected) {
-                    const timeSinceLastSend = currentTime - deepgramMetrics.lastSendTime[track];
-                    
-                    // Send the pre-sliced buffer.
+                    const delta = now - deepgramMetrics.lastSendTime[track];
+                    // Send the buffered data.
                     sttService.send(combinedBuffer);
                     
                     deepgramMetrics.bytesSent[track] += bufferSize;
                     deepgramMetrics.packetsSent[track]++;
-                    
-                    if (timeSinceLastSend > 0) {
-                        const sendRate = bufferSize / (timeSinceLastSend / 1000);
-                        deepgramMetrics.sendRates[track].push(sendRate);
+                    if (delta > 0) {
+                        deepgramMetrics.sendRates[track].push(bufferSize / (delta / 1000));
                     }
-                    deepgramMetrics.lastSendTime[track] = currentTime;
-                    
-                    // Reset error counter.
+                    deepgramMetrics.lastSendTime[track] = now;
+                    // Reset error count on successful send.
                     this.consecutiveErrors[track] = 0;
                 } else {
-                    log.warn(`STT service not connected for ${track} track, buffered ${currentOffset} bytes`);
+                    log.warn(`STT service not connected for ${track} track, buffered ${offset} bytes`);
                     if (bufferSize > 64 * 1024) {
                         this.consecutiveErrors[track]++;
                     }
                 }
-            } catch (error) {
-                log.error(`Error sending ${track} audio to Deepgram`, error);
+            } catch (err) {
+                log.error(`Error sending ${track} audio to Deepgram`, err);
                 this.consecutiveErrors[track]++;
             } finally {
-                // Reset the offset to 0 – no need to create a new Buffer.
+                // Reset the accumulator offset.
                 this.audioAccumulatorOffset[track] = 0;
-                
-                const processingTime = performance.now() - this.processingStartTime[track];
-                this.lastProcessingTime[track] = processingTime;
-                this.metrics.processingTimes[track].push(processingTime);
-                this.metrics.deepgram.responseTimes[track].push(processingTime);
+                const procTime = performance.now() - this.processingStartTime[track];
+                this.lastProcessingTime[track] = procTime;
+                this.metrics.processingTimes[track].push(procTime);
+                this.metrics.deepgram.responseTimes[track].push(procTime);
             }
             
+            // Circuit breaker: if error count is too high, reset the STT service.
             if (this.consecutiveErrors[track] >= this.MAX_CONSECUTIVE_ERRORS) {
                 log.error(`Circuit breaker triggered for ${track} track after ${this.consecutiveErrors[track]} errors`);
                 if (sttService) {
                     sttService.cleanup();
                     this.sttService[track] = new DeepgramSTTService(
-                        this.services.config.deepgram,
-                        (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
-                        (utterance) => this._handleUtteranceEnd(utterance, track)
-                    );
+                                                                    this.services.config.deepgram,
+                                                                    (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
+                                                                    (utterance) => this._handleUtteranceEnd(utterance, track)
+                                                                    );
                 }
                 this.consecutiveErrors[track] = 0;
             }
         }
         
-        // Restart flush timer if session is still active.
+        // Restart the flush timer if the session is still active.
         if (this.active && !this.isShuttingDown) {
             this.startFlushTimer(track);
         }
     }
     
+    
     // Message handling
     _handleMessage(message) {
         if (!this.active) return;
         
-        let data, parsed;
+        let data;
         try {
             // Parse message into JSON
             if (Buffer.isBuffer(message)) {
-                parsed = FastJsonParse(message.toString("utf8"));
+                data = JSON.parse(message.toString("utf8"));
             } else if (typeof message === "string") {
-                parsed = FastJsonParse(message);
+                data = JSON.parse(message);
             } else {
                 return;
             }
-            
-            if( parsed.err ) {
-            	return;
-            }
-             
-    		data = parsed.value;
             
             // Process by event type
             switch (data.event) {
