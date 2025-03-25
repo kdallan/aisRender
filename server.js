@@ -395,6 +395,7 @@ class CallSession {
         const offset = this.audioAccumulatorOffset[track];
         if( 0 === offset ) {
         	this.startFlushTimer(track);
+         	return;   
         }
         	
         // Cache frequently used variables locally.
