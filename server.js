@@ -139,6 +139,10 @@ class CallSession {
         this.hangupInitiated = false;
         this.hasSeenMedia = false;
         
+        // Cache the buffer to decode "base64" into
+        
+        this.decodeBuffer = Buffer.alloc( 4 * 1024 );
+        
         // Counters and audio handling
         this.receivedPackets = 0;
         this.inboundPackets = 0;
@@ -429,17 +433,11 @@ class CallSession {
     _handleMessage(message) {
         if (!this.active) return;
         
+        console.log( "msg: " + typeof message);
+        
         let data;
         try {
-            // Convert the message to a string if it's a Buffer, otherwise use it directly.
-            const jsonStr = Buffer.isBuffer(message)
-              ? message.toString('utf8')
-              : (typeof message === 'string' ? message : null);
-
-            // If we don't have a valid JSON string, exit early.
-            if (jsonStr === null) return;
-
-            const data = simdjson.parse(jsonStr);
+            const data = simdjson.parse( message );
             
             // Process by event type
             switch (data.event) {
@@ -465,8 +463,11 @@ class CallSession {
                     // Only process inbound or outbound tracks.
                     if (track === "inbound" || track === "outbound") {
                         this.inboundPackets++; // Assuming both increment the same counter.
+                        
                         // Create raw audio buffer and accumulate it.
-                        this.accumulateAudio(Buffer.from(payload, "base64"), track);
+                        const bytesWritten = this.decodeBuffer.write( payload, 0, "base64" );
+                        const audioBuffer = this.decodeBuffer.slice( 0, bytesWritten );
+                        this.accumulateAudio( audioBuffer, track );
                     }
                 }
                 break;
