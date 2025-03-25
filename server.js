@@ -413,7 +413,7 @@ class CallSession {
             return;
         }
         
-        if (accumBytes] >= this.bufferSizeThreshold[track]) {
+        if (accumBytes >= this.bufferSizeThreshold[track]) {
             this.flushAudioBuffer(track);
             return;
         }
