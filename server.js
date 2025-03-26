@@ -373,7 +373,7 @@ class CallSession {
 
                 case 'close':
                     log.info('Twilio: Close event received');
-                    this._cleanup();
+                    this.cleanup();
                     break;
             }
         } catch (error) {
@@ -406,7 +406,7 @@ class CallSession {
         this.#stopFlushTimer(TRACK_OUTBOUND);
     }
 
-    #cleanup() {
+    cleanup() { // PUBLIC METHOD
         if (!this.active) return;
 
         if (process.env.WANT_MONITORING) {
@@ -425,7 +425,7 @@ class CallSession {
         const directions = [TRACK_INBOUND, TRACK_OUTBOUND];
         for (const direction of directions) {
             if (this.sttService && this.sttService[direction]) {
-                this.sttService[direction].#cleanup();
+                this.sttService[direction].cleanup();
                 this.sttService[direction] = null;
             }
         }        
@@ -478,7 +478,7 @@ class VoiceServer {
                     ws.sessionId = sessionId; // Store sessionId on the ws object!
                     log.info(`New WebSocket connection established from ${sessionId}`);
 
-                    const session = new CallSession(this.services);
+                    const session = new CallSession();
                     this.sessions.set(sessionId, session);
                 },
                 message: (ws, message, isBinary) => {
@@ -496,7 +496,7 @@ class VoiceServer {
                 close: (ws, code, message) => {
                     const session = this.sessions.get(ws.sessionId);
                     if (session) {
-                        session._cleanup();
+                        session.cleanup();
                     }
                     this.sessions.delete(ws.sessionId); // Ensure session is removed.
                     log.info(`Session ${ws.sessionId} removed`);
@@ -534,7 +534,7 @@ class VoiceServer {
 
         // Cleanup all sessions
         for (const session of this.sessions.values()) {
-            session._cleanup();
+            session.cleanup();
         }
         this.sessions.clear();
 
