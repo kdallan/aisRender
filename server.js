@@ -17,6 +17,7 @@ const TRACK_INBOUND = 'inbound';
 const TRACK_OUTBOUND = 'outbound';
 const INITIAL_THROTTLE_INTERVAL = parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 20;
 const MAX_BUFFER_SIZE = 32 * 1024;
+const LISTENING_PORT = process.env.PORT || 10000;
 
 // Helper function for simdjson lazyParse
 function getValueOrDefault(parsedDoc, path, defaultValue) {
@@ -519,12 +520,12 @@ class VoiceServer {
                     res.end('Not Found');
                 }
             })
-            .listen('0.0.0.0', config.server.port, (listenSocket) => {
+            .listen('0.0.0.0', LISTENING_PORT, (listenSocket) => {
                 if (listenSocket) {
                     this.listenSocket = listenSocket; // Store the listen socket.
-                    log.info(`Server listening on port ${config.server.port}`);
+                    log.info(`Server listening on port ${LISTENING_PORT}`);
                 } else {
-                    log.error(`Failed to start server on port ${config.server.port}`); // Better error handling
+                    log.error(`Failed to start server on port ${LISTENING_PORT}`); // Better error handling
                 }
             });
     }
