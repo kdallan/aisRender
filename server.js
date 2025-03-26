@@ -9,16 +9,7 @@ const simdjson = require('simdjson'); // Fast/lazy parsing
 const { randomUUID } = require('crypto'); // Import randomUUID for session ids
 const scamPhrases = require('./scamphrases');
 const pino = require('pino');
-const log = pino({
-    extreme: true,
-    base: null,
-    level: false,
-    // No formatters - more reliable when removing fields
-    serializers: {
-        time: (time) => time,
-        msg: (msg) => msg
-    }
-});
+const log = pino({ base: null });
 
 require('dotenv').config();
 

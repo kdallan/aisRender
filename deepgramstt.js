@@ -1,16 +1,7 @@
 'use strict';
 const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const pino = require('pino');
-const log = pino({
-    extreme: true,
-    base: null,
-    level: false,
-    // No formatters - more reliable when removing fields
-    serializers: {
-        time: (time) => time,
-        msg: (msg) => msg
-    }
-});
+const log = pino({ base: null });
 
 // DeepgramSTTService
 class DeepgramSTTService {
