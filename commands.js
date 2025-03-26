@@ -2,12 +2,14 @@
 const https = require('https');
 const pino = require('pino');
 const log = pino({
-    extreme: true, // For maximum speed
-    base: null, // Removes pid/hostname
-    formatters: {
-        level: () => ({}), // Remove level
-        bindings: () => ({}), // Remove bindings
-    },
+    extreme: true,
+    base: null,
+    level: false,
+    // No formatters - more reliable when removing fields
+    serializers: {
+        time: (time) => time,
+        msg: (msg) => msg
+    }
 });
 
 function createPOSTOptions(restFunction, accountSid, authToken, postData) {
