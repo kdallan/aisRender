@@ -38,13 +38,13 @@ class AhoCorasick {
         this.root = root;
 
         // Build the trie (goto function).
-        this.buildGotoFunction();
+        this.#buildGotoFunction();
 
         // Build failure links + merge outputs.
-        this.buildFailureAndOutputFunctions();
+        this.#buildFailureAndOutputFunctions();
     }
 
-    buildGotoFunction() {
+    #buildGotoFunction() {
         const root = this.root;
         const phrases = this.phrases;
         // Inline charToIndex to avoid repeated function calls:
@@ -73,7 +73,7 @@ class AhoCorasick {
         }
     }
 
-    buildFailureAndOutputFunctions() {
+    #buildFailureAndOutputFunctions() {
         const root = this.root;
         root.fail = root;
 
@@ -133,7 +133,7 @@ class AhoCorasick {
      * @param {string} text  // text should be normalized: lower-case and [a-z ] only.
      * @returns {Array<{phrase: string, type: string, [command]?: object}>}
      */
-    search(text) {
+    search(text) { // PUBLIC METHOD
         if (!text) return [];
         const matches = [];
         const root = this.root;
@@ -170,7 +170,7 @@ class AhoCorasick {
      * @param {string} text
      * @returns {{ phrase: string, type: string, [command]?: object } | null}
      */
-    containsAny(text) {
+    containsAny(text) { // PUBLIC METHOD
         if (!text) return null;
         const root = this.root;
         let current = root;

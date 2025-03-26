@@ -1,6 +1,5 @@
 'use strict';
 const uWS = require('uWebSockets.js');
-const us_listen_socket_close = uWS.us_listen_socket_close;
 const TranscriptHistory = require('./transcripthistory');
 const { handlePhrase } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
@@ -43,7 +42,6 @@ class CallSession {
         this.callSid = null;
         this.conferenceName = '';
         this.active = true;
-        this.hangupInitiated = false;
         this.receivedPackets = 0;
         this.inboundPackets = 0;
 
@@ -80,7 +78,6 @@ class CallSession {
                 bufferGrowth: { inbound: [], outbound: [] },
                 lastMetricTime: performance.now(),
                 delays: { inbound: 0, outbound: 0 },
-                // Add Deepgram data tracking
                 deepgram: {
                     bytesSent: { inbound: 0, outbound: 0 },
                     packetsSent: { inbound: 0, outbound: 0 },
@@ -99,12 +96,12 @@ class CallSession {
         // Initialize STT services - one for each track
         this.sttService = {
             inbound: new DeepgramSTTService(
-                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, TRACK_INBOUND),
-                (utterance) => this._handleUtteranceEnd(utterance, TRACK_INBOUND)
+                (transcript, isFinal) => this.#handleTranscript(transcript, isFinal, TRACK_INBOUND),
+                (utterance) => this.#handleUtteranceEnd(utterance, TRACK_INBOUND)
             ),
             outbound: new DeepgramSTTService(
-                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, TRACK_OUTBOUND),
-                (utterance) => this._handleUtteranceEnd(utterance, TRACK_OUTBOUND)
+                (transcript, isFinal) => this.#handleTranscript(transcript, isFinal, TRACK_OUTBOUND),
+                (utterance) => this.#handleUtteranceEnd(utterance, TRACK_OUTBOUND)
             ),
         };
 
@@ -129,7 +126,7 @@ class CallSession {
                         2
                     )}ms, delay=${this.metrics.delays.outbound.toFixed(2)}ms`);
 
-                    this.logDeepgramStats();
+                    this.#logDeepgramStats();
 
                     // Reset metrics for next interval
                     this.metrics.processingTimes = { inbound: [], outbound: [] };
@@ -140,7 +137,7 @@ class CallSession {
         }
     }
 
-    logDeepgramStats() {
+    #logDeepgramStats() {
         // Calculate average send rates
         const calcAvgRate = (rates) =>
             rates.length > 0 ? rates.reduce((sum, rate) => sum + rate, 0) / rates.length : 0;
@@ -162,30 +159,30 @@ class CallSession {
         this.metrics.deepgram.sendRates = { inbound: [], outbound: [] };
     }
 
-    stopMemoryMonitor() {
+    #stopMemoryMonitor() {
         if (this.memoryMonitor) {
             clearInterval(this.memoryMonitor);
             this.memoryMonitor = null;
         }
     }
 
-    stopStatsTimer() {
+    #stopStatsTimer() {
         if (this.statsTimer) {
             clearInterval(this.statsTimer);
             this.statsTimer = null;
         }
     }
 
-    stopFlushTimer(track) {
+    #stopFlushTimer(track) {
         if (this.flushTimer[track]) {
             clearTimeout(this.flushTimer[track]);
             this.flushTimer[track] = null;
         }
     }
 
-    startFlushTimer(track) {
+    #startFlushTimer(track) {
         // Cancel the previous timer, if any
-        this.stopFlushTimer(track);
+        this.#stopFlushTimer(track);
 
         if (!this.active || this.isShuttingDown) {
             return;
@@ -213,11 +210,11 @@ class CallSession {
         }
 
         this.flushTimer[track] = setTimeout(() => {
-            this.flushAudioBuffer(track);
+            this.#flushAudioBuffer(track);
         }, interval);
     }
 
-    accumulateAudio(buffer, track) {
+    #accumulateAudio(buffer, track) {
         const bufLen = buffer.length;
         let offset = this.audioAccumulatorOffset[track];
         const accumulator = this.audioAccumulator[track];
@@ -230,7 +227,7 @@ class CallSession {
         // If the new data would exceed the maximum buffer size, flush immediately.
         if (offset + bufLen > MAX_BUFFER_SIZE) {
             log.warn(`${track} accumulator full, flushing before appending new data`);
-            this.flushAudioBuffer(track);
+            this.#flushAudioBuffer(track);
             offset = this.audioAccumulatorOffset[track]; // Should be reset (usually 0) after flush.
         }
 
@@ -255,21 +252,21 @@ class CallSession {
 
         // Flush immediately if the current offset exceeds the dynamic threshold.
         if (offset >= this.bufferSizeThreshold[track]) {
-            this.flushAudioBuffer(track);
+            this.#flushAudioBuffer(track);
             return;
         }
 
         if (!this.flushTimer[track]) {
-            this.startFlushTimer(track);
+            this.#startFlushTimer(track);
         }
     }
 
-    flushAudioBuffer(track) {
-        this.stopFlushTimer(track);
+    #flushAudioBuffer(track) {
+        this.#stopFlushTimer(track);
 
         const offset = this.audioAccumulatorOffset[track];
         if (0 === offset) {
-            this.startFlushTimer(track);
+            this.#startFlushTimer(track);
             return;
         }
 
@@ -328,17 +325,17 @@ class CallSession {
             if (sttService) {
                 sttService.cleanup();
                 this.sttService[track] = new DeepgramSTTService(
-                    (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
-                    (utterance) => this._handleUtteranceEnd(utterance, track)
+                    (transcript, isFinal) => this.#handleTranscript(transcript, isFinal, track),
+                    (utterance) => this.#handleUtteranceEnd(utterance, track)
                 );
             }
             this.consecutiveErrors[track] = 0;
         }
 
-        this.startFlushTimer(track);
+        this.#startFlushTimer(track);
     }
 
-    handleMessage(message, isBinary) {
+    handleMessage(message, isBinary) { // PUBLIC METHOD
         if (!this.active) return;
 
         let data;
@@ -358,7 +355,7 @@ class CallSession {
 
                         if (track === TRACK_INBOUND || track === TRACK_OUTBOUND) {
                             this.inboundPackets++;
-                            this.accumulateAudio(Buffer.from(payload, 'base64'), track);
+                            this.#accumulateAudio(Buffer.from(payload, 'base64'), track);
                         }
                     }
                     break;
@@ -384,8 +381,8 @@ class CallSession {
         }
     }
 
-    _handleTranscript(transcript, isFinal, track) {
-        if (!this.active || this.hangupInitiated) return;
+    #handleTranscript(transcript, isFinal, track) {
+        if (!this.active ) return;
 
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
 
@@ -398,43 +395,40 @@ class CallSession {
         }
     }
 
-    _handleUtteranceEnd(utterance, track) {
+    #handleUtteranceEnd(utterance, track) {
         if (this.active) log.info(`[${track}] Complete utterance: ${utterance}`);
     }
 
-    _clearAllTimers() {
-        this.stopMemoryMonitor();
-        this.stopStatsTimer();
-        this.stopFlushTimer(TRACK_INBOUND);
-        this.stopFlushTimer(TRACK_OUTBOUND);
+    #clearAllTimers() {
+        this.#stopMemoryMonitor();
+        this.#stopStatsTimer();
+        this.#stopFlushTimer(TRACK_INBOUND);
+        this.#stopFlushTimer(TRACK_OUTBOUND);
     }
 
-    _cleanup() {
+    #cleanup() {
         if (!this.active) return;
 
         if (process.env.WANT_MONITORING) {
             // Log final Deepgram stats before cleanup
             if (this.metrics.deepgram.packetsSent.inbound > 0 || this.metrics.deepgram.packetsSent.outbound > 0) {
                 log.info(`Final Deepgram stats for call ${this.callSid || 'unknown'}:`);
-                this.logDeepgramStats();
+                this.#logDeepgramStats();
             }
         }
 
         this.active = false;
-        this.hangupInitiated = false;
         this.isShuttingDown = true;
 
-        this._clearAllTimers();
+        this.#clearAllTimers();
 
-        if (this.sttService && this.sttService.inbound) {
-            this.sttService.inbound.cleanup();
-            this.sttService.inbound = null;
-        }
-
-        if (this.sttService && this.sttService.outbound) {
-            this.sttService.outbound.cleanup();
-            this.sttService.outbound = null;
-        }
+        const directions = [TRACK_INBOUND, TRACK_OUTBOUND];
+        for (const direction of directions) {
+            if (this.sttService && this.sttService[direction]) {
+                this.sttService[direction].#cleanup();
+                this.sttService[direction] = null;
+            }
+        }        
 
         log.info(
             `Call session cleaned up, Call SID: ${this.callSid || 'unknown'}, processed ${this.receivedPackets} packets`

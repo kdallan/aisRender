@@ -54,16 +54,16 @@ class DeepgramSTTService {
                 if (this.deepgram && this.connected) this.deepgram.keepAlive();
             }, 10000);
 
-            this._setupEventListeners();
+            this.#setupEventListeners();
             return this.deepgram;
         } catch (error) {
             log.error('Failed to connect to Deepgram STT', error);
-            this._handleConnectionFailure();
+            this.#handleConnectionFailure();
             return null;
         }
     }
 
-    _handleConnectionFailure() {
+    #handleConnectionFailure() {
         this.connected = false;
 
         if (this.isShuttingDown) return; // Don't try to reconnect if we're shutting down
@@ -79,7 +79,7 @@ class DeepgramSTTService {
         }
     }
 
-    _setupEventListeners() {
+    #setupEventListeners() {
         let dg = this.deepgram;
         if (!dg) return;
 
@@ -122,12 +122,12 @@ class DeepgramSTTService {
         dg.addListener(LiveTranscriptionEvents.Close, () => {
             log.info('DeepgramSTTService:Close - connection closed');
             this.connected = false;
-            this._handleConnectionFailure();
+            this.#handleConnectionFailure();
         });
 
         dg.addListener(LiveTranscriptionEvents.Error, (error) => {
             log.error('DeepgramSTTService:Error - ', error);
-            if (!this.connected) this._handleConnectionFailure();
+            if (!this.connected) this.#handleConnectionFailure();
         });
 
         dg.addListener(LiveTranscriptionEvents.Warning, (warning) => {
@@ -135,7 +135,7 @@ class DeepgramSTTService {
         });
     }
 
-    send(audioData) {
+    send(audioData) { // PUBLIC METHOD
         if (!this.connected || this.isShuttingDown) return;
 
         if (!audioData || !Buffer.isBuffer(audioData) || audioData.length === 0) {
@@ -152,12 +152,12 @@ class DeepgramSTTService {
             log.error('DeepgramSTTService:send - failed to send: ', error);
             if (error.message?.includes('not open')) {
                 this.connected = false;
-                this._handleConnectionFailure();
+                this.#handleConnectionFailure();
             }
         }
     }
 
-    cleanup() {
+    cleanup() { // PUBLIC METHOD
         this.isShuttingDown = true;
         this.connected = false;
 
