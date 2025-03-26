@@ -51,6 +51,7 @@ const config = (() => {
                 sample_rate: 8000,
                 channels: 1,
                 no_delay: true,
+                speech_final: true,
                 interim_results: true,
                 endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 5,
                 utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000
@@ -365,10 +366,10 @@ class CallSession {
             if (sttService) {
                 sttService.cleanup();
                 this.sttService[track] = new DeepgramSTTService(
-                                                                this.services.config.deepgram,
-                                                                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
-                                                                (utterance) => this._handleUtteranceEnd(utterance, track)
-                                                                );
+                    this.services.config.deepgram,
+                    (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
+                    (utterance) => this._handleUtteranceEnd(utterance, track)
+                    );
             }
             this.consecutiveErrors[track] = 0;
         }

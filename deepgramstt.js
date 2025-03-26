@@ -32,8 +32,8 @@ class DeepgramSTTService {
         
         try {
             log.info(this.reconnectAttempts > 0 
-                     ? `Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`
-                     : "Connecting to Deepgram...");
+                ? `Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`
+                : "Connecting to Deepgram...");
             
             this.deepgram = this.client?.listen?.live(this.config?.sttConfig);
             
@@ -88,7 +88,7 @@ class DeepgramSTTService {
                     return;
                 }
                 
-                let finals = this.isfinals;
+                let finals = this.isFinals;
                 if( !finals ) return;
                 
                 finals.push(transcript);
