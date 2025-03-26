@@ -35,9 +35,12 @@ class DeepgramSTTService {
                      ? `Reconnecting to Deepgram (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`
                      : "Connecting to Deepgram...");
             
-            this.deepgram = this.client.listen.live(this.config.sttConfig);
+            this.deepgram = this.client?.listen?.live(this.config?.sttConfig);
             
-            if (this.keepAliveInterval) clearInterval(this.keepAliveInterval);
+            if (this.keepAliveInterval) {
+            	clearInterval(this.keepAliveInterval);
+             }
+                
             this.keepAliveInterval = setInterval(() => {
                 if (this.deepgram && this.connected) this.deepgram.keepAlive();
             }, 10000);
@@ -54,7 +57,7 @@ class DeepgramSTTService {
     _handleConnectionFailure() {
         this.connected = false;
         
-        if (this.isShuttingDown) return; // Don't try to reconnect if we shut down
+        if (this.isShuttingDown) return; // Don't try to reconnect if we're shutting down
         
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
@@ -69,16 +72,15 @@ class DeepgramSTTService {
     
     _setupEventListeners() {
     	let dg = this.deepgram;
+     	if( !dg ) return;   
               
-        // Open event
-        dg?.addListener(LiveTranscriptionEvents.Open, () => {
-            log.info("Deepgram STT connection opened");
+        dg.addListener(LiveTranscriptionEvents.Open, () => {
+            log.info("DeepgramSTTService:Open - connection opened");
             this.connected = true;
             this.reconnectAttempts = 0;
             
-            // Transcript event
-            dg?.addListener(LiveTranscriptionEvents.Transcript, (data) => {
-                const transcript = data.channel?.alternatives?.[0]?.transcript;
+            dg.addListener(LiveTranscriptionEvents.Transcript, (data) => {
+                const transcript = data?.channel?.alternatives?.[0]?.transcript;
                 if (!transcript) return;
                 
                 if (!data.is_final) {
@@ -86,48 +88,59 @@ class DeepgramSTTService {
                     return;
                 }
                 
-                this.isFinals.push(transcript);
+                let finals = this.isfinals;
+                if( !finals ) return;
+                
+                finals.push(transcript);
+                
                 if (data.speech_final) {
-                    this.onTranscript?.(this.isFinals.join(" "), true);
+                    this.onTranscript?.(finals.join(" "), true);
                     this.isFinals = [];
                 } else {
                     this.onTranscript?.(transcript, true);
                 }
             });
             
-            // Utterance end event
-            dg?.addListener(LiveTranscriptionEvents.UtteranceEnd, () => {
-                if (this.isFinals.length > 0) {
-                    this.onUtteranceEnd?.(this.isFinals.join(" "));
+            dg.addListener(LiveTranscriptionEvents.UtteranceEnd, () => {
+            	let finals = this.isFinals;
+                if (finals && finals.length > 0) {
+                    this.onUtteranceEnd?.(finals.join(" "));
                     this.isFinals = [];
                 }
             });
         });
         
-        // Error and close events
-        dg?.addListener(LiveTranscriptionEvents.Close, () => {
-            log.info("Deepgram STT connection closed");
+        dg.addListener(LiveTranscriptionEvents.Close, () => {
+            log.info("DeepgramSTTService:Close - connection closed");
             this.connected = false;
             this._handleConnectionFailure();
         });
         
-        dg?.addListener(LiveTranscriptionEvents.Error, (error) => {
-            log.error("Deepgram STT error: ", error);
+        dg.addListener(LiveTranscriptionEvents.Error, (error) => {
+            log.error("DeepgramSTTService:Error - ", error);
             if (!this.connected) this._handleConnectionFailure();
         });
         
-        dg?.addListener(LiveTranscriptionEvents.Warning, (warning) => {
-            log.warn("Deepgram STT warning: ", warning);
+        dg.addListener(LiveTranscriptionEvents.Warning, (warning) => {
+            log.warn("DeepgramSTTService:Warning - ", warning);
         });
     }
     
     send(audioData) {
-        if (!this.connected || !this.deepgram || !audioData || !Buffer.isBuffer(audioData) || audioData.length === 0) return;
+        if (!this.connected ||this.isShuttingDown) return;
+        
+        if( !audioData || !Buffer.isBuffer(audioData) || audioData.length === 0) {
+        	log.warn( "DeepgramSTTService:send - no audio data" );
+         	return;
+        }
+        
+        let dg = this.deepgram;
+        if( !dg ) return;
         
         try {
-            this.deepgram.send(audioData);
+            dg.send(audioData);
         } catch (error) {
-            log.error("Failed to send audio to Deepgram: ", error);
+            log.error("DeepgramSTTService:send - failed to send: ", error);
             if (error.message?.includes("not open")) {
                 this.connected = false;
                 this._handleConnectionFailure();
@@ -137,22 +150,24 @@ class DeepgramSTTService {
     
     cleanup() {
         this.isShuttingDown = true;
+        this.connected = false;        
         
-        if (this.keepAliveInterval) {
-            clearInterval(this.keepAliveInterval);
+        let keepalive = this.keepAliveInterval;
+        if (keepalive) {
+            clearInterval(keepalive);
             this.keepAliveInterval = null;
         }
-        
-        if (this.deepgram) {
-            try {
-                this.deepgram.requestClose();
-            } catch (error) {
-                log.error("Error while closing Deepgram connection: ", error);
-            }
-            this.deepgram = null;
+                
+        let dg = this.deepgram;
+        if( !dg ) return;
+            
+        try {
+            dg.requestClose();
+        } catch (error) {
+            log.error("DeepgramSTTService:cleanup: ", error);
         }
         
-        this.connected = false;
+        this.deepgram = null;        
     }
 }
 

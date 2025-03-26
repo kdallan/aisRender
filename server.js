@@ -9,80 +9,9 @@ const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
 const simdjson = require('simdjson'); // Fast/lazy parsing
 const { randomUUID } = require('crypto'); // Import randomUUID for session ids
+const scamPhrases = require( './scamphrases' );
 
 require("dotenv").config();
-
-const scamPhrases_1 = [
-    { phrase: "hangup", type: "cmd" },
-    { phrase: "hang up", type: "cmd" },
-    { phrase: "hang on", type: "cmd" }, // Deepgram keeps mis-translating 'hang up' to 'hang on'
-    { phrase: "i love you", type: "match" },
-    { phrase: "soulmate", type: "match" },
-    { phrase: "meant to be", type: "match" },
-    { phrase: "help me", type: "match" },
-    { phrase: "money for a ticket", type: "match" },
-    { phrase: "urgent need", type: "match" },
-    { phrase: "wedding plans", type: "match" },
-    { phrase: "trust me", type: "match" },
-    { phrase: "send me gift cards", type: "match" },
-    { phrase: "i need your help", type: "match" },
-    { phrase: "guaranteed return", type: "match" },
-    { phrase: "risk free", type: "match" },
-    { phrase: "act fast", type: "match" },
-    { phrase: "limited time opportunity", type: "match" },
-    { phrase: "secure your future", type: "match" },
-    { phrase: "no risk", type: "match" },
-    { phrase: "double your money", type: "match" },
-    { phrase: "get rich quick", type: "match" },
-    { phrase: "investment portfolio", type: "match" },
-    { phrase: "exclusive deal", type: "match" },
-    { phrase: "debt forgiveness", type: "match" },
-    { phrase: "consolidate your loans", type: "match" },
-    { phrase: "low interest rate", type: "match" },
-    { phrase: "act now to reduce debt", type: "match" },
-    { phrase: "past due payment", type: "match" },
-    { phrase: "insurance claim overdue", type: "match" },
-    { phrase: "urgent action required", type: "match" },
-    { phrase: "policy cancellation", type: "match" },
-    { phrase: "pay to reactivate", type: "match" },
-    { phrase: "its me your grandson", type: "match" },
-    { phrase: "help me out of trouble", type: "match" },
-    { phrase: "i need bail money", type: "match" },
-    { phrase: "dont tell mom", type: "match" },
-    { phrase: "urgent family emergency", type: "match" },
-    { phrase: "send money immediately", type: "match" },
-    { phrase: "wire transfer needed", type: "match" },
-    { phrase: "im in danger", type: "match" },
-    { phrase: "please trust me", type: "match" },
-    { phrase: "youve won", type: "match" },
-    { phrase: "claim your prize", type: "match" },
-    { phrase: "pay a fee to collect", type: "match" },
-    { phrase: "cash transfer required", type: "match" },
-    { phrase: "congratulations youre the winner", type: "match" },
-    { phrase: "lottery winnings", type: "match" },
-    { phrase: "exclusive prize claim", type: "match" },
-    { phrase: "act fast to secure your prize", type: "match" },
-    { phrase: "winner notification", type: "match" },
-    { phrase: "your computer is at risk", type: "match" },
-    { phrase: "remote access required", type: "match" },
-    { phrase: "fix your account", type: "match" },
-    { phrase: "service renewal", type: "match" },
-    { phrase: "subscription fee", type: "match" },
-    { phrase: "update your device", type: "match" },
-    { phrase: "account locked", type: "match" },
-    { phrase: "technical problem detected", type: "match" },
-    { phrase: "call this number immediately", type: "match" },
-    { phrase: "tax debt", type: "match" },
-    { phrase: "unpaid taxes", type: "match" },
-    { phrase: "irs agent", type: "match" },
-    { phrase: "legal action required", type: "match" },
-    { phrase: "arrest warrant issued", type: "match" },
-    { phrase: "pay now to avoid penalties", type: "match" },
-    { phrase: "urgent tax resolution", type: "match" },
-    { phrase: "back taxes owed", type: "match" },
-    { phrase: "settlement fee", type: "match" },
-    { phrase: "tax relief services", type: "match" }
-];
 
 // Simplified logger
 const log = {
@@ -91,6 +20,9 @@ const log = {
     warn: (msg, data) => console.warn(`[WARN] ${msg}`, data || ""),
     debug: (msg, data) => process.env.DEBUG && console.log(`[DEBUG] ${msg}`, data || "")
 };
+
+const TRACK_INBOUND = 'inbound';
+const TRACK_OUTBOUND = 'outbound';
 
 // Configuration
 const config = (() => {
@@ -147,7 +79,6 @@ function formatBytes(bytes) {
     return `${(bytes / 1048576).toFixed(2)} MB`;
 }
 
-// CallSession - Optimized version with Deepgram data tracking
 class CallSession {
     constructor( services ) {
         this.services = services;
@@ -204,22 +135,22 @@ class CallSession {
         }
         
         this.transcriptHistory = {
-            inbound: new TranscriptHistory( scamPhrases_1 ),
-            outbound: new TranscriptHistory( scamPhrases_1 )
+            inbound: new TranscriptHistory( scamPhrases ),
+            outbound: new TranscriptHistory( scamPhrases )
         };
         
         // Initialize STT services - one for each track
         this.sttService = {
             inbound: new DeepgramSTTService(
-                                            this.services.config.deepgram,
-                                            (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'inbound'),
-                                            (utterance) => this._handleUtteranceEnd(utterance, 'inbound')
-                                            ),
+                this.services.config.deepgram,
+                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, TRACK_INBOUND),
+                (utterance) => this._handleUtteranceEnd(utterance, TRACK_INBOUND)
+            ),
             outbound: new DeepgramSTTService(
-                                             this.services.config.deepgram,
-                                             (transcript, isFinal) => this._handleTranscript(transcript, isFinal, 'outbound'),
-                                             (utterance) => this._handleUtteranceEnd(utterance, 'outbound')
-                                             )
+                this.services.config.deepgram,
+                (transcript, isFinal) => this._handleTranscript(transcript, isFinal, TRACK_OUTBOUND),
+                (utterance) => this._handleUtteranceEnd(utterance, TRACK_OUTBOUND)
+            )
         };
         
         if( process.env.WANT_MONITORING ) {
@@ -233,8 +164,7 @@ class CallSession {
                     
                     log.info(`Performance metrics: 
               Inbound: buffer=${this.audioAccumulatorSize.inbound} bytes, avgProcessing=${avgProcessingTimeInbound.toFixed(2)}ms, delay=${this.metrics.delays.inbound.toFixed(2)}ms
-              Outbound: buffer=${this.audioAccumulatorSize.outbound} bytes, avgProcessing=${avgProcessingTimeOutbound.toFixed(2)}ms, delay=${this.metrics.delays.outbound.toFixed(2)}ms`
-                             );
+              Outbound: buffer=${this.audioAccumulatorSize.outbound} bytes, avgProcessing=${avgProcessingTimeOutbound.toFixed(2)}ms, delay=${this.metrics.delays.outbound.toFixed(2)}ms` );
                     
                     this.logDeepgramStats();
                     
@@ -260,8 +190,7 @@ class CallSession {
       Inbound: ${formatBytes(this.metrics.deepgram.bytesSent.inbound)} total (${this.metrics.deepgram.packetsSent.inbound} packets, avg ${inboundAvgRate.toFixed(2)} B/s)
       Outbound: ${formatBytes(this.metrics.deepgram.bytesSent.outbound)} total (${this.metrics.deepgram.packetsSent.outbound} packets, avg ${outboundAvgRate.toFixed(2)} B/s)
       Current rate (inbound): ${formatBytes(inboundAvgRate)} per second
-      Current rate (outbound): ${formatBytes(outboundAvgRate)} per second
-    `);
+      Current rate (outbound): ${formatBytes(outboundAvgRate)} per second` );
         
         // Reset rate tracking (but keep totals)
         this.metrics.deepgram.sendRates = { inbound: [], outbound: [] };
@@ -452,9 +381,9 @@ class CallSession {
 
         let data;
         try {
-             // uWS always gives ArrayBuffer.  Need to convert to string.
-            const messageString = Buffer.from(message).toString('utf8');
-            data = simdjson.lazyParse(messageString);
+            // uWS always gives ArrayBuffer.  Need to convert to string.
+            // lazyParse = good speedup
+            data = simdjson.lazyParse( Buffer.from(message).toString('utf8'));
 
             let event = data.valueForKeyPath("event");
 
@@ -465,7 +394,7 @@ class CallSession {
                     let payload = data.valueForKeyPath("media.payload"); // Not optional
                     let track = data.valueForKeyPath("media.track"); // Not optional
 
-                    if (track === "inbound" || track === "outbound") {
+                    if (track === TRACK_INBOUND || track === TRACK_OUTBOUND) {
                         this.inboundPackets++;
                         this.accumulateAudio( Buffer.from( payload, 'base64' ), track);
                     }
@@ -492,7 +421,6 @@ class CallSession {
         }
     }
     
-    // Transcript handling - now includes track information
     _handleTranscript(transcript, isFinal, track) {
         if (!this.active || this.hangupInitiated) return;
         
@@ -512,7 +440,6 @@ class CallSession {
         if (this.active) log.info(`[${track}] Complete utterance: ${utterance}`);
     }
     
-    // Call control
     async _handleHangup(customPhrase) {
         if (!this.active || !this.callSid || this.hangupInitiated) return;
         
@@ -529,8 +456,8 @@ class CallSession {
     _clearAllTimers() {
 		this.stopMemoryMonitor();
 		this.stopStatsTimer();
-  		this.stopFlushTimer( 'inbound' );
-    	this.stopFlushTimer( 'outbound' );
+  		this.stopFlushTimer( TRACK_INBOUND );
+    	this.stopFlushTimer( TRACK_OUTBOUND );
     }    
     
     _cleanup() {
