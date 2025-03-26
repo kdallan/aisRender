@@ -2,26 +2,27 @@
 const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const pino = require('pino');
 const log = pino({ base: null });
+const { DEEPGRAM_API_KEY } = require('./config');
 
 // DeepgramSTTService
 class DeepgramSTTService {
     constructor(onTranscript, onUtteranceEnd) {
         this.sttConfig = {
-            model: process.env.DEEPGRAM_MODEL || 'nova-3', // "nova-2-phonecall",
-            language: process.env.DEEPGRAM_LANGUAGE || 'en-US',
+            model: 'nova-3',
+            language: 'en-US',
             encoding: 'mulaw',
             sample_rate: 8000,
             channels: 1,
             no_delay: true,
             speech_final: true,
             interim_results: true,
-            endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 5,
-            utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000,
+            endpointing: 5,
+            utterance_end_ms: 1000,
         };
 
         this.onTranscript = onTranscript;
         this.onUtteranceEnd = onUtteranceEnd;
-        this.client = createClient(process.env.DEEPGRAM_API_KEY);
+        this.client = createClient(DEEPGRAM_API_KEY);
         this.deepgram = null;
         this.isFinals = [];
         this.connected = false;

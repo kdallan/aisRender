@@ -48,8 +48,6 @@ function addParticipant(phoneNumber, conferenceName, accountSid, authToken) {
     return sendPOSTrequest(options, postData);
 }
 
-// process.env.TWILIO_STUDIO_FLOW_ID || 'FWe2a7c39cffcbe604f2f158b68aae3b19'
-
 async function runTwilioFlow(callSid, flowId, accountSid, authToken) {
 
     const client = twilio(accountSid, authToken);
@@ -98,6 +96,10 @@ async function handleHangup(customPhrase) {
         log.error('Failed to hang up call', error);
     }
 }
+
+// process.env.TWILIO_STUDIO_FLOW_ID
+// process.env.TWILIO_ACCOUNT_SID
+// process.env.TWILIO_AUTH_TOKEN
 
 async function runCommand( command, callSid ) {
     log.info( `Running command: ${command}` );

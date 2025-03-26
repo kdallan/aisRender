@@ -9,14 +9,14 @@ const { randomUUID } = require('crypto'); // Import randomUUID for session ids
 const scamPhrases = require('./scamphrases');
 const pino = require('pino');
 const log = pino({ base: null });
+const { PORT, WANT_MONITORING } = require('./config');
 
 require('dotenv').config();
 
 const TRACK_INBOUND = 'inbound';
 const TRACK_OUTBOUND = 'outbound';
-const INITIAL_THROTTLE_INTERVAL = parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 20;
+const INITIAL_THROTTLE_INTERVAL = 20;
 const MAX_BUFFER_SIZE = 32 * 1024;
-const LISTENING_PORT = process.env.PORT || 10000;
 
 // Helper function for simdjson lazyParse
 function getValueOrDefault(parsedDoc, path, defaultValue) {
@@ -72,7 +72,7 @@ class CallSession {
         this.consecutiveErrors = { inbound: 0, outbound: 0 };
         this.MAX_CONSECUTIVE_ERRORS = 15;
 
-        if (process.env.WANT_MONITORING) {
+        if (WANT_MONITORING) {
             this.metrics = {
                 processingTimes: { inbound: [], outbound: [] },
                 bufferGrowth: { inbound: [], outbound: [] },
@@ -105,7 +105,7 @@ class CallSession {
             ),
         };
 
-        if (process.env.WANT_MONITORING) {
+        if (WANT_MONITORING) {
             this.statsTimer = setInterval(() => {
                 if (this.receivedPackets > 0) {
                     log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}`);
@@ -201,7 +201,7 @@ class CallSession {
             interval = Math.max(baseInterval - 5, 10); // Try to catch up, but not too fast
         }
 
-        if (process.env.WANT_MONITORING) {
+        if (WANT_MONITORING) {
             if (processingTakingLonger) {
                 this.metrics.delays[track] = processingTime - baseInterval;
             } else {
@@ -220,7 +220,7 @@ class CallSession {
         const accumulator = this.audioAccumulator[track];
 
         let growthMetric;
-        if (process.env.WANT_MONITORING) {
+        if (WANT_MONITORING) {
             growthMetric = this.metrics.bufferGrowth[track];
         }
 
@@ -236,7 +236,7 @@ class CallSession {
         offset += bufLen;
         this.audioAccumulatorOffset[track] = offset;
 
-        if (process.env.WANT_MONITORING) {
+        if (WANT_MONITORING) {
             growthMetric.push(bufLen);
         }
 
@@ -278,16 +278,16 @@ class CallSession {
         this.processingStartTime[track] = now;
 
         let deepgramMetrics, delta;
-        if (process.env.WANT_MONITORING) {
+        if (WANT_MONITORING) {
             deepgramMetrics = this.metrics.deepgram;
             delta = now - deepgramMetrics.lastSendTime[track];
         }
 
         try {
-            if (sttService && sttService.connected) {
+            if (sttService?.connected) {
                 sttService.send(combinedBuffer);
 
-                if (process.env.WANT_MONITORING) {
+                if (WANT_MONITORING) {
                     deepgramMetrics.bytesSent[track] += bufferSize;
                     deepgramMetrics.packetsSent[track]++;
                     if (delta > 0) {
@@ -313,7 +313,7 @@ class CallSession {
             const procTime = performance.now() - this.processingStartTime[track];
             this.lastProcessingTime[track] = procTime;
 
-            if (process.env.WANT_MONITORING) {
+            if (WANT_MONITORING) {
                 this.metrics.processingTimes[track].push(procTime);
                 this.metrics.deepgram.responseTimes[track].push(procTime);
             }
@@ -409,7 +409,7 @@ class CallSession {
     cleanup() { // PUBLIC METHOD
         if (!this.active) return;
 
-        if (process.env.WANT_MONITORING) {
+        if (WANT_MONITORING) {
             // Log final Deepgram stats before cleanup
             if (this.metrics.deepgram.packetsSent.inbound > 0 || this.metrics.deepgram.packetsSent.outbound > 0) {
                 log.info(`Final Deepgram stats for call ${this.callSid || 'unknown'}:`);
@@ -422,10 +422,11 @@ class CallSession {
 
         this.#clearAllTimers();
 
+        let stt = this.sttService;
         const directions = [TRACK_INBOUND, TRACK_OUTBOUND];
         for (const direction of directions) {
-            if (this.sttService && this.sttService[direction]) {
-                this.sttService[direction].cleanup();
+            if (stt?.[direction]) {
+                stt[direction].cleanup();
                 this.sttService[direction] = null;
             }
         }        
@@ -443,7 +444,7 @@ class VoiceServer {
         this.isShuttingDown = false;
         this.listenSocket = null; // Keep track of the listen socket for closing.
 
-        if (process.env.WANT_MONITORING) {
+        if (WANT_MONITORING) {
             this.memoryMonitor = setInterval(() => {
                 const memoryUsage = process.memoryUsage();
 
@@ -514,12 +515,12 @@ class VoiceServer {
                     res.end('Not Found');
                 }
             })
-            .listen('0.0.0.0', LISTENING_PORT, (listenSocket) => {
+            .listen('0.0.0.0', PORT, (listenSocket) => {
                 if (listenSocket) {
                     this.listenSocket = listenSocket; // Store the listen socket.
-                    log.info(`Server listening on port ${LISTENING_PORT}`);
+                    log.info(`Server listening on port ${PORT}`);
                 } else {
-                    log.error(`Failed to start server on port ${LISTENING_PORT}`); // Better error handling
+                    log.error(`Failed to start server on port ${PORT}`); // Better error handling
                 }
             });
     }

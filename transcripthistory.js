@@ -21,7 +21,7 @@ class TranscriptHistory {
     constructor(phrases) {
         this.finder = createScamDetector(phrases);
         // Determine the maximum number of words needed based on the longest phrase.
-        this.maxWords = Math.max(1, this._longestPhraseInWords(phrases));
+        this.maxWords = Math.max(1, this.#longestPhraseInWords(phrases));
         // Set up a circular buffer to avoid costly shift() calls.
         this.buffer = new Array(this.maxWords);
         this.start = 0; // Points to the oldest element.
@@ -33,6 +33,7 @@ class TranscriptHistory {
      * @param {string} transcript
      */
     push(transcript) {
+        // PUBLIC METHOD
         if (!transcript) return;
         // Clean and normalize in one pass: lowercase, collapse non-alphanumerics to a space, trim.
         const cleaned = transcript.toLowerCase().replace(CLEAN_REGEX, ' ').trim();
@@ -80,13 +81,16 @@ class TranscriptHistory {
         if (numWordsBack <= 0) {
             return this.buffer[(this.start + this.size - 1) % this.maxWords];
         }
-        const count = numWordsBack < this.size ? numWordsBack : this.size;
-        const result = new Array(count);
-        // Collect the last `count` words from the circular buffer.
+
+        const count = Math.min(numWordsBack, this.size);
+        let result = '';
+
         for (let i = 0; i < count; i++) {
-            result[i] = this.buffer[(this.start + this.size - count + i) % this.maxWords];
+            if (i > 0) result += ' ';
+            result += this.buffer[(this.start + this.size - count + i) % this.maxWords];
         }
-        return result.join(' ');
+
+        return result;
     }
 
     /**
@@ -94,7 +98,7 @@ class TranscriptHistory {
      * @param {Object[]} phrases
      * @returns {number}
      */
-    _longestPhraseInWords(phrases) {
+    #longestPhraseInWords(phrases) {
         let max = 0;
         for (let i = 0, len = phrases.length; i < len; i++) {
             // Trim once and split on whitespace.
