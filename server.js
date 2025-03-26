@@ -305,7 +305,7 @@ class CallSession {
 
         try {
             if (sttService?.connected) {
-                sttService.send(combinedBuffer);
+                sttService.send(test0Combined);
 
                 if (WANT_MONITORING) {
                     deepgramMetrics.bytesSent[track] += bufferSize;
