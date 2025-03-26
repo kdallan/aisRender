@@ -7,6 +7,7 @@ const { performance } = require('perf_hooks');
 const simdjson = require('simdjson'); // Fast/lazy parsing
 const { randomUUID } = require('crypto'); // Import randomUUID for session ids
 const scamPhrases = require('./scamphrases');
+const { FastBuffer } = require('./fastbuffer');
 const pino = require('pino');
 const log = pino({ base: null });
 const { PORT, WANT_MONITORING } = require('./config');
@@ -44,6 +45,8 @@ class CallSession {
         this.active = true;
         this.receivedPackets = 0;
         this.inboundPackets = 0;
+
+        this.test0 = new FastBuffer(1024);
 
         // SEPARATE TRACK PROCESSING - Create separate buffers for each track
         this.audioAccumulator = {

@@ -1,0 +1,49 @@
+'use strict';
+
+function nextPowerOfTwo(num) {
+    if (num <= 0) {
+        return 1;
+    }
+    let power = 1;
+    while (power < num) {
+        power *= 2;
+    }
+    return power;
+}
+
+class FastBuffer {
+    constructor(size) {
+        this.buffer = Buffer.alloc( nextPowerOfTwo( size ));
+        this.offset = 0;
+    }
+
+    append(chunk) {
+    	if( chunk.length === 0 ) return;
+        
+        let total = this.offset + chunk.length
+        if (total > this.buffer.length) {
+            let newBuffer = Buffer.alloc( nextPowerOfTwo( total ));
+            this.buffer.copy(newBuffer);
+            this.buffer = newBuffer;
+        }
+        
+        chunk.copy( this.buffer, this.offset);
+        this.offset += chunk.length;
+    }
+
+    getBuffer() {
+        return this.buffer.subarray(0, this.offset);
+    }
+
+    reset() {
+        this.offset = 0;
+    }
+
+    length() {
+        return this.offset;
+    }
+}
+
+module.exports = {
+    FastBuffer,
+};
