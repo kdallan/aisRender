@@ -46,7 +46,10 @@ class CallSession {
         this.receivedPackets = 0;
         this.inboundPackets = 0;
 
-        this.test0 = new FastBuffer(1024);
+        this.test0 = {
+            inbound: new FastBuffer(1024),
+            outbound: new FastBuffer(1024)
+        };
 
         // SEPARATE TRACK PROCESSING - Create separate buffers for each track
         this.audioAccumulator = {
@@ -239,7 +242,7 @@ class CallSession {
         offset += bufLen;
         this.audioAccumulatorOffset[track] = offset;
 
-        this.test0.append( buffer );
+        this.test0[ track ].append( buffer );
 
         if (WANT_MONITORING) {
             growthMetric.push(bufLen);
@@ -282,6 +285,8 @@ class CallSession {
         const now = performance.now();
         this.processingStartTime[track] = now;
 
+        const test0Combined = this.test0[ track ].getBuffer();
+
         let deepgramMetrics, delta;
         if (WANT_MONITORING) {
             deepgramMetrics = this.metrics.deepgram;
@@ -315,7 +320,8 @@ class CallSession {
         } finally {
             // Reset the accumulator offset.
             this.audioAccumulatorOffset[track] = 0;
-            this.test0.reset();
+            this.test0[ track ].reset();
+
             const procTime = performance.now() - this.processingStartTime[track];
             this.lastProcessingTime[track] = procTime;
 
