@@ -221,31 +221,15 @@ class CallSession {
     }
 
     #accumulateAudio(buffer, track) {
-        const bufLen = buffer.length;
-        let offset = this.audioAccumulatorOffset[track];
-        const accumulator = this.audioAccumulator[track];
-
         let growthMetric;
         if (WANT_MONITORING) {
             growthMetric = this.metrics.bufferGrowth[track];
         }
 
-        // If the new data would exceed the maximum buffer size, flush immediately.
-        if (offset + bufLen > MAX_BUFFER_SIZE) {
-            log.warn(`${track} accumulator full, flushing before appending new data`);
-            this.#flushAudioBuffer(track);
-            offset = this.audioAccumulatorOffset[track]; // Should be reset (usually 0) after flush.
-        }
-
-        // Copy the incoming data into the preallocated buffer.
-        buffer.copy(accumulator, offset);
-        offset += bufLen;
-        this.audioAccumulatorOffset[track] = offset;
-
         this.test0[ track ].append( buffer );
 
         if (WANT_MONITORING) {
-            growthMetric.push(bufLen);
+            growthMetric.push(buffer.length);
         }
 
         // Adjust the flush threshold based on previous processing time.
@@ -259,7 +243,7 @@ class CallSession {
         }
 
         // Flush immediately if the current offset exceeds the dynamic threshold.
-        if (offset >= this.bufferSizeThreshold[track]) {
+        if (this.test0[ track ].length() >= this.bufferSizeThreshold[track]) {
             this.#flushAudioBuffer(track);
             return;
         }
@@ -272,30 +256,17 @@ class CallSession {
     #flushAudioBuffer(track) {
         this.#stopFlushTimer(track);
 
-        const offset = this.audioAccumulatorOffset[track];
+        const offset = this.test0[ track ].length();
         if (0 === offset) {
             this.#startFlushTimer(track);
             return;
         }
 
-        const accumulator = this.audioAccumulator[track];
-        const combinedBuffer = accumulator.slice(0, offset);
-        const bufferSize = combinedBuffer.length;
+        const test0Combined = this.test0[ track ].getBuffer();
+        const bufferSize = test0Combined.length;
         const sttService = this.sttService[track];
         const now = performance.now();
         this.processingStartTime[track] = now;
-
-        const test0Combined = this.test0[ track ].getBuffer();
-        if( test0Combined.length != combinedBuffer.length ) {
-            log.error( `Buffers do not match: ${test0Combined.length} != ${combinedBuffer.length}` );
-        } else {
-            for (let i = 0; i < test0Combined.length; i++) {
-                if (test0Combined[i] !== combinedBuffer[i]) {
-                    log.error( `Buffers matches up to : ${i}` );
-                    break;
-                }
-            }        
-        }
 
         let deepgramMetrics, delta;
         if (WANT_MONITORING) {
@@ -329,7 +300,6 @@ class CallSession {
             this.consecutiveErrors[track]++;
         } finally {
             // Reset the accumulator offset.
-            this.audioAccumulatorOffset[track] = 0;
             this.test0[ track ].reset();
 
             const procTime = performance.now() - this.processingStartTime[track];
