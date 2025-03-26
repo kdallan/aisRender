@@ -7,8 +7,7 @@ const log = pino({
     formatters: {
       level: () => ({}),    // Remove level
       bindings: () => ({})  // Remove bindings
-    },
-    timestamp: false   // Remove timestamp
+    }
   });
 
 // DeepgramSTTService
