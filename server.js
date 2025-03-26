@@ -239,6 +239,8 @@ class CallSession {
         offset += bufLen;
         this.audioAccumulatorOffset[track] = offset;
 
+        this.test0.append( buffer );
+
         if (WANT_MONITORING) {
             growthMetric.push(bufLen);
         }
@@ -313,6 +315,7 @@ class CallSession {
         } finally {
             // Reset the accumulator offset.
             this.audioAccumulatorOffset[track] = 0;
+            this.test0.reset();
             const procTime = performance.now() - this.processingStartTime[track];
             this.lastProcessingTime[track] = procTime;
 
