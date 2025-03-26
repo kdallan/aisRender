@@ -1,5 +1,7 @@
-const http = require("http");
+'use strict';
 const https = require('https');
+const pino = require('pino');
+const log = pino();
 
 function createPOSTOptions( restFunction, accountSid, authToken, postData ) {
 	return {

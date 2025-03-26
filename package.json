@@ -15,8 +15,14 @@
   "dependencies": {
     "@deepgram/sdk": "^3.11.2",
     "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
     "simdjson": "^0.9.2",
     "twilio": "^5.5.1",
- 	"uWebSockets.js": "https://github.com/uNetworking/uWebSockets.js/archive/v20.51.0.tar.gz"    
+    "uWebSockets.js": "https://github.com/uNetworking/uWebSockets.js/archive/v20.51.0.tar.gz"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.23.0",
+    "eslint": "^9.23.0",
+    "globals": "^16.0.0"
   }
 }

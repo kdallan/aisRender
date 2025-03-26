@@ -1,6 +1,4 @@
-// Import required modules
-const http = require( "http" );
-const https = require( "https" );
+'use strict';
 const uWS = require('uWebSockets.js');
 const us_listen_socket_close = uWS.us_listen_socket_close;
 const TranscriptHistory = require( "./transcripthistory" );
@@ -10,16 +8,10 @@ const { performance } = require('perf_hooks');
 const simdjson = require('simdjson'); // Fast/lazy parsing
 const { randomUUID } = require('crypto'); // Import randomUUID for session ids
 const scamPhrases = require( './scamphrases' );
+const pino = require('pino');
+const log = pino();
 
 require("dotenv").config();
-
-// Simplified logger
-const log = {
-    info: (msg, data) => console.log(`${msg}`, data || ""),
-    error: (msg, err) => console.error(`[ERROR] ${msg}`, err || ""),
-    warn: (msg, data) => console.warn(`[WARN] ${msg}`, data || ""),
-    debug: (msg, data) => process.env.DEBUG && console.log(`[DEBUG] ${msg}`, data || "")
-};
 
 const TRACK_INBOUND = 'inbound';
 const TRACK_OUTBOUND = 'outbound';
@@ -65,7 +57,7 @@ const config = (() => {
 function getValueOrDefault( parsedDoc, path, defaultValue ) {
     try {
         return parsedDoc.valueForKeyPath( path );
-    } catch (error) {
+    } catch {
         return defaultValue;
     }
 }
@@ -389,15 +381,15 @@ class CallSession {
             let event = data.valueForKeyPath("event");
 
             switch (event) {
-                case "media":
-                    this.receivedPackets++;
+                case "media": {
+                        this.receivedPackets++;
+                        let payload = data.valueForKeyPath("media.payload"); // Not optional
+                        let track = data.valueForKeyPath("media.track"); // Not optional
 
-                    let payload = data.valueForKeyPath("media.payload"); // Not optional
-                    let track = data.valueForKeyPath("media.track"); // Not optional
-
-                    if (track === TRACK_INBOUND || track === TRACK_OUTBOUND) {
-                        this.inboundPackets++;
-                        this.accumulateAudio( Buffer.from( payload, 'base64' ), track);
+                        if (track === TRACK_INBOUND || track === TRACK_OUTBOUND) {
+                            this.inboundPackets++;
+                            this.accumulateAudio( Buffer.from( payload, 'base64' ), track);
+                        }
                     }
                     break;
 
