@@ -71,4 +71,4 @@ const scamPhrases = [
     { phrase: "tax relief services", type: "match" }
 ];
 
-module.exports = { scamPhrases };
+module.exports = scamPhrases;
