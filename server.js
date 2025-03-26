@@ -286,6 +286,16 @@ class CallSession {
         this.processingStartTime[track] = now;
 
         const test0Combined = this.test0[ track ].getBuffer();
+        if( test0Combined.length != combinedBuffer.length ) {
+            log.error( `Buffers do not match: ${test0Combined.length} != ${combinedBuffer.length}` );
+        } else {
+            for (let i = 0; i < test0Combined.length; i++) {
+                if (test0Combined[i] !== combinedBuffer[i]) {
+                    log.error( `Buffers matches up to : ${i}` );
+                    break;
+                }
+            }        
+        }
 
         let deepgramMetrics, delta;
         if (WANT_MONITORING) {
