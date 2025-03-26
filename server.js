@@ -391,7 +391,7 @@ class CallSession {
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
-            handlePhrase(hit, track, this.callSid);
+            handlePhrase(hit, track, this.callSid, this.conferenceName);
         }
     }
 
