@@ -2,21 +2,13 @@
 const https = require('https');
 const pino = require('pino');
 const log = pino({
-    extreme: true,  // For maximum speed
-    base: null,     // Removes pid/hostname
+    extreme: true,     // For maximum speed
+    base: null,        // Removes pid/hostname
     formatters: {
-      level: () => ({}),      // Remove level
-      bindings: () => ({})    // Remove bindings
+      level: () => ({}),    // Remove level
+      bindings: () => ({})  // Remove bindings
     },
-    timestamp: false,         // Remove timestamp
-    messageKey: 'msg',        // Ensure message key is 'msg'
-    transport: {
-      target: 'pino/file',
-      options: {
-        destination: 1,       // stdout
-        formatter: (obj) => `${obj.msg}\n`
-      }
-    }
+    timestamp: false   // Remove timestamp
   });
 
 function createPOSTOptions( restFunction, accountSid, authToken, postData ) {
