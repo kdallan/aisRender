@@ -7,7 +7,7 @@ function createNode() {
     return {
         goto: new Array(AHO_NODE_SIZE).fill(null),
         fail: null,
-        output: null
+        output: null,
     };
 }
 
@@ -27,36 +27,36 @@ class AhoCorasick {
                 // Keep the entire object but with trimmed phrase.
                 normalized.push({
                     ...p,
-                    phrase: norm
+                    phrase: norm,
                 });
             }
         }
         this.phrases = normalized;
-        
+
         // Create root node.
         const root = createNode();
         this.root = root;
-        
+
         // Build the trie (goto function).
         this.buildGotoFunction();
-        
+
         // Build failure links + merge outputs.
         this.buildFailureAndOutputFunctions();
     }
-    
+
     buildGotoFunction() {
         const root = this.root;
         const phrases = this.phrases;
         // Inline charToIndex to avoid repeated function calls:
         // (c === ' ') ? 26 : (c.charCodeAt(0) - 97)
-        
+
         for (let i = 0; i < phrases.length; i++) {
             let current = root;
             const pattern = phrases[i].phrase;
             for (let j = 0; j < pattern.length; j++) {
                 const c = pattern[j];
-                const idx = (c === ' ') ? 26 : (c.charCodeAt(0) - 97);
-                
+                const idx = c === ' ' ? 26 : c.charCodeAt(0) - 97;
+
                 let nextNode = current.goto[idx];
                 if (nextNode === null) {
                     nextNode = createNode();
@@ -72,15 +72,16 @@ class AhoCorasick {
             }
         }
     }
-    
+
     buildFailureAndOutputFunctions() {
         const root = this.root;
         root.fail = root;
-        
+
         // BFS queue to build fail links
         const queue = [];
-        let head = 0, tail = 0;
-        
+        let head = 0,
+            tail = 0;
+
         // Init queue with all immediate children of root
         for (let i = 0; i < AHO_NODE_SIZE; i++) {
             const child = root.goto[i];
@@ -93,10 +94,10 @@ class AhoCorasick {
                 root.goto[i] = root;
             }
         }
-        
+
         while (head < tail) {
             const current = queue[head++];
-            
+
             for (let i = 0; i < AHO_NODE_SIZE; i++) {
                 let child = current.goto[i];
                 if (!child) {
@@ -104,16 +105,16 @@ class AhoCorasick {
                     current.goto[i] = current.fail.goto[i];
                     continue;
                 }
-                
+
                 queue[tail++] = child;
-                
+
                 // Find fail state
                 let failState = current.fail;
                 while (!failState.goto[i]) {
                     failState = failState.fail;
                 }
                 child.fail = failState.goto[i];
-                
+
                 // Merge output from the fail state
                 if (child.fail.output) {
                     if (!child.output) {
@@ -125,7 +126,7 @@ class AhoCorasick {
             }
         }
     }
-    
+
     /**
      * Return an array of all pattern matches in the given text.
      * Each match is returned as a JSON object with its meta-data.
@@ -137,17 +138,17 @@ class AhoCorasick {
         const matches = [];
         const root = this.root;
         let current = root;
-        
+
         for (let i = 0; i < text.length; i++) {
             const c = text[i];
-            const idx = (c === ' ') ? 26 : (c.charCodeAt(0) - 97);
-            
+            const idx = c === ' ' ? 26 : c.charCodeAt(0) - 97;
+
             // Follow fail links until we find a valid goto
             while (!current.goto[idx]) {
                 current = current.fail;
             }
             current = current.goto[idx];
-            
+
             if (current.output) {
                 // Gather outputs
                 const out = current.output;
@@ -155,14 +156,14 @@ class AhoCorasick {
                     matches.push({
                         phrase: out[k].phrase,
                         type: out[k].type,
-                        ...(out[k].command && { command: out[k].command })
+                        ...(out[k].command && { command: out[k].command }),
                     });
                 }
             }
         }
         return matches;
     }
-    
+
     /**
      * Return the first found pattern match (or null) in the given text.
      * The text is guaranteed to contain only [a-z ].
@@ -173,23 +174,23 @@ class AhoCorasick {
         if (!text) return null;
         const root = this.root;
         let current = root;
-        
+
         for (let i = 0; i < text.length; i++) {
             const c = text[i];
-            const idx = (c === ' ') ? 26 : (c.charCodeAt(0) - 97);
-            
+            const idx = c === ' ' ? 26 : c.charCodeAt(0) - 97;
+
             while (!current.goto[idx]) {
                 current = current.fail;
             }
             current = current.goto[idx];
-            
+
             if (current.output) {
                 // Return the first match immediately
                 const found = current.output[0];
                 return {
                     phrase: found.phrase,
                     type: found.type,
-                    ...(found.command && { command: found.command })
+                    ...(found.command && { command: found.command }),
                 };
             }
         }

@@ -2,7 +2,7 @@
 const uWS = require('uWebSockets.js');
 const us_listen_socket_close = uWS.us_listen_socket_close;
 const TranscriptHistory = require('./transcripthistory');
-const { addParticipant, TwilioService } = require('./commands');
+const { handlePhrase } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
 const simdjson = require('simdjson'); // Fast/lazy parsing
@@ -15,44 +15,8 @@ require('dotenv').config();
 
 const TRACK_INBOUND = 'inbound';
 const TRACK_OUTBOUND = 'outbound';
-
-// Configuration
-const config = (() => {
-    // Check required environment variables
-    ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'DEEPGRAM_API_KEY'].forEach((varName) => {
-        if (!process.env[varName]) throw new Error(`Missing required environment variable: ${varName}`);
-    });
-
-    return {
-        server: {
-            port: process.env.PORT || 8080,
-        },
-        twilio: {
-            accountSid: process.env.TWILIO_ACCOUNT_SID,
-            authToken: process.env.TWILIO_AUTH_TOKEN,
-            studioFlowId: process.env.TWILIO_STUDIO_FLOW_ID || 'FWe2a7c39cffcbe604f2f158b68aae3b19',
-        },
-        deepgram: {
-            apiKey: process.env.DEEPGRAM_API_KEY,
-            ttsWebsocketURL:
-                process.env.DEEPGRAM_TTS_WS_URL ||
-                'wss://api.deepgram.com/v1/speak?encoding=mulaw&sample_rate=8000&container=none',
-            sttConfig: {
-                model: process.env.DEEPGRAM_MODEL || 'nova-3', // "nova-2-phonecall",
-                language: process.env.DEEPGRAM_LANGUAGE || 'en-US',
-                encoding: 'mulaw',
-                sample_rate: 8000,
-                channels: 1,
-                no_delay: true,
-                speech_final: true,
-                interim_results: true,
-                endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 5,
-                utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000,
-            },
-            throttleInterval: parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 20,
-        },
-    };
-})();
+const INITIAL_THROTTLE_INTERVAL = parseInt(process.env.DEEPGRAM_THROTTLE_INTERVAL) || 20;
+const MAX_BUFFER_SIZE = 32 * 1024;
 
 // Helper function for simdjson lazyParse
 function getValueOrDefault(parsedDoc, path, defaultValue) {
@@ -74,20 +38,18 @@ function formatBytes(bytes) {
 }
 
 class CallSession {
-    constructor(services) {
-        this.services = services;
+    constructor() {
         this.callSid = null;
         this.conferenceName = '';
         this.active = true;
         this.hangupInitiated = false;
         this.receivedPackets = 0;
         this.inboundPackets = 0;
-        this.MAX_BUFFER_SIZE = 32 * 1024;
 
         // SEPARATE TRACK PROCESSING - Create separate buffers for each track
         this.audioAccumulator = {
-            inbound: Buffer.alloc(this.MAX_BUFFER_SIZE),
-            outbound: Buffer.alloc(this.MAX_BUFFER_SIZE),
+            inbound: Buffer.alloc(MAX_BUFFER_SIZE),
+            outbound: Buffer.alloc(MAX_BUFFER_SIZE),
         };
 
         this.audioAccumulatorOffset = {
@@ -103,8 +65,8 @@ class CallSession {
         this.bufferSizeThreshold = { inbound: 2 * 1024, outbound: 2 * 1024 }; // 2 KB initially
         this.flushTimer = { inbound: null, outbound: null };
         this.flushInterval = {
-            inbound: this.services.config.deepgram.throttleInterval,
-            outbound: this.services.config.deepgram.throttleInterval,
+            inbound: INITIAL_THROTTLE_INTERVAL,
+            outbound: INITIAL_THROTTLE_INTERVAL,
         };
 
         // ERROR RESILIENCE - Add maximum sizes and circuit breaker
@@ -136,12 +98,10 @@ class CallSession {
         // Initialize STT services - one for each track
         this.sttService = {
             inbound: new DeepgramSTTService(
-                this.services.config.deepgram,
                 (transcript, isFinal) => this._handleTranscript(transcript, isFinal, TRACK_INBOUND),
                 (utterance) => this._handleUtteranceEnd(utterance, TRACK_INBOUND)
             ),
             outbound: new DeepgramSTTService(
-                this.services.config.deepgram,
                 (transcript, isFinal) => this._handleTranscript(transcript, isFinal, TRACK_OUTBOUND),
                 (utterance) => this._handleUtteranceEnd(utterance, TRACK_OUTBOUND)
             ),
@@ -259,7 +219,6 @@ class CallSession {
     accumulateAudio(buffer, track) {
         const bufLen = buffer.length;
         let offset = this.audioAccumulatorOffset[track];
-        const maxSize = this.MAX_BUFFER_SIZE;
         const accumulator = this.audioAccumulator[track];
 
         let growthMetric;
@@ -268,7 +227,7 @@ class CallSession {
         }
 
         // If the new data would exceed the maximum buffer size, flush immediately.
-        if (offset + bufLen > maxSize) {
+        if (offset + bufLen > MAX_BUFFER_SIZE) {
             log.warn(`${track} accumulator full, flushing before appending new data`);
             this.flushAudioBuffer(track);
             offset = this.audioAccumulatorOffset[track]; // Should be reset (usually 0) after flush.
@@ -368,7 +327,6 @@ class CallSession {
             if (sttService) {
                 sttService.cleanup();
                 this.sttService[track] = new DeepgramSTTService(
-                    this.services.config.deepgram,
                     (transcript, isFinal) => this._handleTranscript(transcript, isFinal, track),
                     (utterance) => this._handleUtteranceEnd(utterance, track)
                 );
@@ -435,28 +393,12 @@ class CallSession {
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
-            log.info('Scam phrase: ' + JSON.stringify(hit, null, 2));
-            this._handleHangup('Scam phrase detected. Goodbye.');
+            handlePhrase(hit, track, this.callSid);
         }
     }
 
     _handleUtteranceEnd(utterance, track) {
         if (this.active) log.info(`[${track}] Complete utterance: ${utterance}`);
-    }
-
-    async _handleHangup(customPhrase) {
-        if (!this.active || !this.callSid || this.hangupInitiated) return;
-
-        try {
-            this.hangupInitiated = true;
-            log.info(
-                `Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ''}`
-            );
-
-            await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
-        } catch (error) {
-            log.error('Failed to hang up call', error);
-        }
     }
 
     _clearAllTimers() {
@@ -502,11 +444,6 @@ class CallSession {
 // VoiceServer (uWebSockets.js Version)
 class VoiceServer {
     constructor() {
-        this.services = {
-            config,
-            twilioService: new TwilioService(config.twilio),
-        };
-
         this.sessions = new Map();
         this.isShuttingDown = false;
         this.listenSocket = null; // Keep track of the listen socket for closing.

@@ -1,6 +1,7 @@
 'use strict';
 const https = require('https');
 const pino = require('pino');
+const twilio = require('twilio');
 const log = pino({ base: null });
 
 function createPOSTOptions(restFunction, accountSid, authToken, postData) {
@@ -47,46 +48,66 @@ function addParticipant(phoneNumber, conferenceName, accountSid, authToken) {
     return sendPOSTrequest(options, postData);
 }
 
-// TwilioService
-class TwilioService {
-    constructor(config) {
-        this.config = config;
-        this.client = require('twilio')(config.accountSid, config.authToken);
-        this.VoiceResponse = require('twilio').twiml.VoiceResponse;
-    }
+// process.env.TWILIO_STUDIO_FLOW_ID || 'FWe2a7c39cffcbe604f2f158b68aae3b19'
 
-    async runTwilioFlow(callSid) {
-        try {
-            log.info(`Calling Twilio flow: ${callSid}`);
-            const execution = await this.client.studio.v2.flows(this.config.studioFlowId).executions(callSid);
-            log.info('Flow executed', { executionSid: execution.sid });
-            return execution;
-        } catch (error) {
-            log.error('Failed to call flow', error);
-            throw error;
-        }
-    }
+async function runTwilioFlow(callSid, flowId, accountSid, authToken) {
 
-    async sayPhraseAndHangup(callSid, phrase) {
-        if (!callSid) throw new Error('Call SID is required');
-
-        try {
-            log.info(`Saying phrase and hanging up call ${callSid}: "${phrase}"`);
-            const twiml = new this.VoiceResponse();
-            twiml.say({ voice: 'Polly.Amy-Neural', language: 'en-US' }, phrase);
-            twiml.leave();
-
-            const result = await this.client.calls(callSid).update({ twiml: twiml.toString() });
-            log.info(`Call ${callSid} successfully updated with TwiML`);
-            return result;
-        } catch (error) {
-            log.error(`Failed to update call ${callSid} with TwiML`, error);
-            throw error;
-        }
+    const client = twilio(accountSid, authToken);
+    
+    try {
+        log.info(`Calling Twilio flow: ${callSid}`);
+        const execution = await client.studio.v2.flows(flowId).executions(callSid);
+        log.info('Flow executed', { executionSid: execution.sid });
+        return execution;
+    } catch (error) {
+        log.error('Failed to call flow', error);
+        throw error;
     }
 }
 
+async function sayPhraseAndHangup( callSid, phrase, accountSid, authToken ) {
+
+    const client = twilio(accountSid, authToken);
+    const VoiceResponse = twilio.twiml.VoiceResponse;
+
+    try {
+        log.info(`Saying phrase and hanging up call ${callSid}: "${phrase}"`);
+        const twiml = new VoiceResponse();
+        twiml.say({ voice: 'Polly.Amy-Neural', language: 'en-US' }, phrase);
+        twiml.leave();
+
+        const result = await client.calls(callSid).update({ twiml: twiml.toString() });
+        log.info(`Call ${callSid} successfully updated with TwiML`);
+        return result;
+    } catch (error) {
+        log.error(`Failed to update call ${callSid} with TwiML`, error);
+        throw error;
+    }
+}
+async function handleHangup(customPhrase) {
+    if (!this.active || !this.callSid || this.hangupInitiated) return;
+
+    try {
+        this.hangupInitiated = true;
+        log.info(
+            `Initiating hangup for call ${this.callSid}${customPhrase ? ` with message: "${customPhrase}"` : ''}`
+        );
+
+        await this.services.twilioService.sayPhraseAndHangup(this.callSid, customPhrase);
+    } catch (error) {
+        log.error('Failed to hang up call', error);
+    }
+}
+
+async function runCommand( command, callSid ) {
+    log.info( `Running command: ${command}` );
+}
+
+async function handlePhrase( phrase, callSid ) {
+    log.info( `Handling phrase: ${phrase}` );
+}
+
 module.exports = {
-    addParticipant,
-    TwilioService,
+    runCommand,
+    handlePhrase
 };

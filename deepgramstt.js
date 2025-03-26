@@ -5,11 +5,23 @@ const log = pino({ base: null });
 
 // DeepgramSTTService
 class DeepgramSTTService {
-    constructor(config, onTranscript, onUtteranceEnd) {
-        this.config = config;
+    constructor(onTranscript, onUtteranceEnd) {
+        this.sttConfig = {
+            model: process.env.DEEPGRAM_MODEL || 'nova-3', // "nova-2-phonecall",
+            language: process.env.DEEPGRAM_LANGUAGE || 'en-US',
+            encoding: 'mulaw',
+            sample_rate: 8000,
+            channels: 1,
+            no_delay: true,
+            speech_final: true,
+            interim_results: true,
+            endpointing: parseInt(process.env.DEEPGRAM_ENDPOINTING) || 5,
+            utterance_end_ms: parseInt(process.env.DEEPGRAM_UTTERANCE_END_MS) || 1000,
+        };
+
         this.onTranscript = onTranscript;
         this.onUtteranceEnd = onUtteranceEnd;
-        this.client = createClient(config.apiKey);
+        this.client = createClient(process.env.DEEPGRAM_API_KEY);
         this.deepgram = null;
         this.isFinals = [];
         this.connected = false;
@@ -32,7 +44,7 @@ class DeepgramSTTService {
                     : 'Connecting to Deepgram...'
             );
 
-            this.deepgram = this.client?.listen?.live(this.config?.sttConfig);
+            this.deepgram = this.client?.listen?.live(this.sttConfig);
 
             if (this.keepAliveInterval) {
                 clearInterval(this.keepAliveInterval);
