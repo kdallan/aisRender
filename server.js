@@ -46,20 +46,9 @@ class CallSession {
         this.receivedPackets = 0;
         this.inboundPackets = 0;
 
-        this.test0 = {
+        this.audioBuffer = {
             inbound: new FastBuffer(1024),
             outbound: new FastBuffer(1024)
-        };
-
-        // SEPARATE TRACK PROCESSING - Create separate buffers for each track
-        this.audioAccumulator = {
-            inbound: Buffer.alloc(MAX_BUFFER_SIZE),
-            outbound: Buffer.alloc(MAX_BUFFER_SIZE),
-        };
-
-        this.audioAccumulatorOffset = {
-            inbound: 0,
-            outbound: 0,
         };
 
         this.audioAccumulatorSize = { inbound: 0, outbound: 0 };
@@ -226,7 +215,7 @@ class CallSession {
             growthMetric = this.metrics.bufferGrowth[track];
         }
 
-        this.test0[ track ].append( buffer );
+        this.audioBuffer[ track ].append( buffer );
 
         if (WANT_MONITORING) {
             growthMetric.push(buffer.length);
@@ -242,8 +231,7 @@ class CallSession {
             }
         }
 
-        // Flush immediately if the current offset exceeds the dynamic threshold.
-        if (this.test0[ track ].length() >= this.bufferSizeThreshold[track]) {
+        if (this.audioBuffer[ track ].length() >= this.bufferSizeThreshold[track]) {
             this.#flushAudioBuffer(track);
             return;
         }
@@ -256,14 +244,14 @@ class CallSession {
     #flushAudioBuffer(track) {
         this.#stopFlushTimer(track);
 
-        const offset = this.test0[ track ].length();
+        const offset = this.audioBuffer[ track ].length();
         if (0 === offset) {
             this.#startFlushTimer(track);
             return;
         }
 
-        const test0Combined = this.test0[ track ].getBuffer();
-        const bufferSize = test0Combined.length;
+        const audioBufferCombined = this.audioBuffer[ track ].getBuffer();
+        const bufferSize = audioBufferCombined.length;
         const sttService = this.sttService[track];
         const now = performance.now();
         this.processingStartTime[track] = now;
@@ -276,7 +264,7 @@ class CallSession {
 
         try {
             if (sttService?.connected) {
-                sttService.send(test0Combined);
+                sttService.send(audioBufferCombined);
 
                 if (WANT_MONITORING) {
                     deepgramMetrics.bytesSent[track] += bufferSize;
@@ -299,8 +287,7 @@ class CallSession {
             log.error(`Error sending ${track} audio to Deepgram`, err);
             this.consecutiveErrors[track]++;
         } finally {
-            // Reset the accumulator offset.
-            this.test0[ track ].reset();
+            this.audioBuffer[ track ].reset();
 
             const procTime = performance.now() - this.processingStartTime[track];
             this.lastProcessingTime[track] = procTime;
