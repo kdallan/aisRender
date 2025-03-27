@@ -8,6 +8,7 @@ const simdjson = require('simdjson'); // Fast/lazy parsing
 const { randomUUID } = require('crypto'); // Import randomUUID for session ids
 const scamPhrases = require('./scamphrases');
 const { FastBuffer } = require('./fastbuffer');
+const { formatBytes, calculateAverage } = require('./utils');
 const pino = require('pino');
 const log = pino({ base: null });
 const { PORT, WANT_MONITORING } = require('./config');
@@ -27,16 +28,6 @@ function getValueOrDefault(parsedDoc, path, defaultValue) {
     }
 }
 
-function calculateAverage(array) {
-    return array.length > 0 ? array.reduce((a, b) => a + b, 0) / array.length : 0;
-}
-
-function formatBytes(bytes) {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1048576) return `${(bytes / 1024).toFixed(2)} KB`;
-    return `${(bytes / 1048576).toFixed(2)} MB`;
-}
-
 class CallSession {
     constructor() {
         this.callSid = null;
@@ -50,12 +41,11 @@ class CallSession {
             outbound: new FastBuffer(16384),
         };
 
-        this.audioAccumulatorSize = { inbound: 0, outbound: 0 };
-        this.lastProcessingTime = { inbound: 0, outbound: 0 };
         this.processingStartTime = { inbound: 0, outbound: 0 };
+        this.lastProcessingTime = { inbound: 0, outbound: 0 };
 
         // ADAPTIVE BUFFER MANAGEMENT - Add parameters
-        this.bufferSizeThreshold = { inbound: 2 * 1024, outbound: 2 * 1024 }; // 2 KB initially
+        this.bufferSizeThreshold = { inbound: 2048, outbound: 2048 }; // 2 KB initially
         this.flushTimer = { inbound: null, outbound: null };
         this.flushInterval = {
             inbound: INITIAL_THROTTLE_INTERVAL,
@@ -65,22 +55,6 @@ class CallSession {
         // ERROR RESILIENCE - Add maximum sizes and circuit breaker
         this.consecutiveErrors = { inbound: 0, outbound: 0 };
         this.MAX_CONSECUTIVE_ERRORS = 15;
-
-        if (WANT_MONITORING) {
-            this.metrics = {
-                processingTimes: { inbound: [], outbound: [] },
-                bufferGrowth: { inbound: [], outbound: [] },
-                lastMetricTime: performance.now(),
-                delays: { inbound: 0, outbound: 0 },
-                deepgram: {
-                    bytesSent: { inbound: 0, outbound: 0 },
-                    packetsSent: { inbound: 0, outbound: 0 },
-                    sendRates: { inbound: [], outbound: [] },
-                    lastSendTime: { inbound: performance.now(), outbound: performance.now() },
-                    responseTimes: { inbound: [], outbound: [] },
-                },
-            };
-        }
 
         this.transcriptHistory = {
             inbound: new TranscriptHistory(scamPhrases),
@@ -100,6 +74,21 @@ class CallSession {
         };
 
         if (WANT_MONITORING) {
+            this.audioAccumulatorSize = { inbound: 0, outbound: 0 };
+            this.metrics = {
+                processingTimes: { inbound: [], outbound: [] },
+                bufferGrowth: { inbound: [], outbound: [] },
+                lastMetricTime: performance.now(),
+                delays: { inbound: 0, outbound: 0 },
+                deepgram: {
+                    bytesSent: { inbound: 0, outbound: 0 },
+                    packetsSent: { inbound: 0, outbound: 0 },
+                    sendRates: { inbound: [], outbound: [] },
+                    lastSendTime: { inbound: performance.now(), outbound: performance.now() },
+                    responseTimes: { inbound: [], outbound: [] },
+                },
+            };
+
             this.statsTimer = setInterval(() => {
                 if (this.receivedPackets > 0) {
                     log.info(`Call stats: total=${this.receivedPackets}, inbound=${this.inboundPackets}`);

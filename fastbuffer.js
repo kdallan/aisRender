@@ -15,7 +15,7 @@ function nextPowerOfTwo(num) {
 
 class FastBuffer {
     constructor(size) {
-        this.buffer = Buffer.alloc( nextPowerOfTwo( size ));
+        this.buffer = Buffer.allocUnsafe( nextPowerOfTwo( size ));
         this.offset = 0;
     }
 
