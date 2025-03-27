@@ -12,6 +12,7 @@ const { formatBytes, calculateAverage } = require('./utils');
 const pino = require('pino');
 const log = pino({ base: null });
 const { PORT, WANT_MONITORING } = require('./config');
+const { TextDecoder } = require('util');
 
 require('dotenv').config();
 
@@ -35,6 +36,7 @@ class CallSession {
         this.active = true;
         this.receivedPackets = 0;
         this.inboundPackets = 0;
+        this.decoder = new TextDecoder('utf-8');
 
         this.audioBuffer = {
             inbound: new FastBuffer(16384),
