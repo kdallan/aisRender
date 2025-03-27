@@ -1,4 +1,6 @@
 'use strict';
+const pino = require('pino');
+const log = pino({ base: null });
 
 function nextPowerOfTwo(num) {
     if (num <= 0) {
@@ -22,9 +24,12 @@ class FastBuffer {
         
         let total = this.offset + chunk.length
         if (total > this.buffer.length) {
-            let newBuffer = Buffer.alloc( nextPowerOfTwo( total ));
+
+            const nextpow2 = nextPowerOfTwo( total );
+            log.warn( 'FastBuffer:append - resizing buffer from', this.buffer.length, 'to', nextpow2);
+            let newBuffer = Buffer.alloc( nextpow2 );
             this.buffer.copy(newBuffer);
-            this.buffer = newBuffer;
+            this.buffer = newBuffer; // TODO: create a buffer pool
         }
         
         chunk.copy( this.buffer, this.offset);

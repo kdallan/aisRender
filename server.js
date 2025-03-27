@@ -212,25 +212,24 @@ class CallSession {
         let growthMetric;
         if (WANT_MONITORING) {
             growthMetric = this.metrics.bufferGrowth[track];
-        }
-
-        this.audioBuffer[track].append(buffer);
-
-        if (WANT_MONITORING) {
             growthMetric.push(buffer.length);
+            this.audioAccumulatorSize[track] += buffer.length;
         }
+
+        let audioBuffer = this.audioBuffer[track];
+        audioBuffer.append(buffer);        
 
         // Adjust the flush threshold based on previous processing time.
         const pTime = this.lastProcessingTime[track];
         if (pTime > 0) {
             if (pTime < 10) {
-                this.bufferSizeThreshold[track] = Math.max(512, this.bufferSizeThreshold[track] - 128);
+                this.bufferSizeThreshold[track] = Math.max(128, this.bufferSizeThreshold[track] - 128);
             } else if (pTime > 50) {
-                this.bufferSizeThreshold[track] = Math.min(6 * 1024, this.bufferSizeThreshold[track] + 256);
+                this.bufferSizeThreshold[track] = Math.min(2 * 1024, this.bufferSizeThreshold[track] + 256);
             }
         }
 
-        if (this.audioBuffer[track].length() >= this.bufferSizeThreshold[track]) {
+        if (audioBuffer.length() >= this.bufferSizeThreshold[track]) {
             this.#flushAudioBuffer(track);
             return;
         }
@@ -243,13 +242,13 @@ class CallSession {
     #flushAudioBuffer(track) {
         this.#stopFlushTimer(track);
 
-        const offset = this.audioBuffer[track].length();
-        if (0 === offset) {
+        let audioBuffer = this.audioBuffer[track];
+        if (0 === audioBuffer.length()) {
             this.#startFlushTimer(track);
             return;
         }
 
-        const audioBufferCombined = this.audioBuffer[track].getBuffer();
+        const audioBufferCombined = audioBuffer.getBuffer();
         const bufferSize = audioBufferCombined.length;
         const sttService = this.sttService[track];
         const now = performance.now();
@@ -277,7 +276,7 @@ class CallSession {
                 // Reset error count on successful send.
                 this.consecutiveErrors[track] = 0;
             } else {
-                log.warn(`STT service not connected for ${track} track, buffered ${offset} bytes`);
+                log.warn(`STT service not connected for ${track} track, buffered ${bufferSize} bytes`);
                 if (bufferSize > 32 * 1024) {
                     this.consecutiveErrors[track]++;
                 }
@@ -286,7 +285,7 @@ class CallSession {
             log.error(`Error sending ${track} audio to Deepgram`, err);
             this.consecutiveErrors[track]++;
         } finally {
-            this.audioBuffer[track].reset();
+            audioBuffer.reset();
 
             const procTime = performance.now() - this.processingStartTime[track];
             this.lastProcessingTime[track] = procTime;

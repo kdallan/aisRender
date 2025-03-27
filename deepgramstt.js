@@ -25,6 +25,7 @@ class DeepgramSTTService {
         this.client = createClient(DEEPGRAM_API_KEY);
         this.deepgram = null;
         this.isFinals = new Array( 32 );
+        this.isFinals.length = 0; // Need to initialize the array to avoid undefined values
         this.connected = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
@@ -103,7 +104,7 @@ class DeepgramSTTService {
 
                 if (data.speech_final) {
                     this.onTranscript?.(finals.join(' '), true);
-                    this.isFinals.length = 0;
+                    this.isFinals.length = 0; // Zero length to reuse the array
                 } else {
                     this.onTranscript?.(transcript, true);
                 }
@@ -113,7 +114,7 @@ class DeepgramSTTService {
                 let finals = this.isFinals;
                 if (finals.length > 0) {
                     this.onUtteranceEnd?.(finals.join(' '));
-                    this.isFinals.length = 0;
+                    this.isFinals.length = 0; // Zero length to reuse the array
                 }
             });
         });
