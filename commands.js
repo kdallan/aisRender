@@ -28,7 +28,7 @@ function sendPOSTrequest(options, postData) {
             });
 
             res.on('end', () => {
-                log.info('POST Response:', data);
+                log.info(`POST Response [${res.statusCode}]:`, data);
                 resolve(data);
             });
         });
@@ -44,12 +44,14 @@ function sendPOSTrequest(options, postData) {
 }
 
 async function addParticipant(phoneNumber, conferenceName) {
+    const verb = 'addParticipant';
     if (!phoneNumber || !conferenceName) {
-        log.error('Phone number and conference name are required');
-        return { success: false, action: 'error', message: 'Phone number and conference name are required' };
+        const msg = `Phone number and conference name are required`;
+        log.error(verb + ': ' + msg);
+        return { success: false, action: verb, message: msg };
     }
 
-    log.info(`Adding participant ${phoneNumber} to conference "${conferenceName}"`);
+    log.info(`${verb} ${phoneNumber} "${conferenceName}"`);
 
     const postData = `phoneNumber=${encodeURIComponent(phoneNumber)}&conferenceName=${encodeURIComponent(
         conferenceName
@@ -60,16 +62,77 @@ async function addParticipant(phoneNumber, conferenceName) {
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
-            action: 'addParticipant',
-            message: `Participant ${phoneNumber} added to conference`,
+            action: verb,
+            message: `${phoneNumber} "${conferenceName}"`,
             data: response,
         };
     } catch (error) {
-        log.error(`Failed to add participant ${phoneNumber} to conference`, error);
+        log.error(`Failed ${verb} ${phoneNumber} "${conferenceName}"`, error);
         return {
             success: false,
-            action: 'error',
-            message: `Failed to add participant: ${error.message}`,
+            action: verb,
+            message: `${phoneNumber} "${conferenceName}" ${error.message}`,
+        };
+    }
+}
+
+async function talkToSID(callSid, conferenceName) {
+    const verb = 'talkToSID';
+    if (!callSid || !conferenceName) {
+        const msg = `Call SID and conference name are required`;
+        log.error(verb + ': ' + msg);
+        return { success: false, action: verb, message: msg };
+    }
+
+    log.info(`${verb} ${callSid} "${conferenceName}"`);
+
+    const postData = `callSID=${encodeURIComponent(callSid)}&conferenceName=${encodeURIComponent(conferenceName)}`;
+
+    try {
+        const options = createPOSTOptions('guardian/talkToSID', postData);
+        const response = await sendPOSTrequest(options, postData);
+        return {
+            success: true,
+            action: verb,
+            message: `${callSid} "${conferenceName}"`,
+            data: response,
+        };
+    } catch (error) {
+        log.error(`Failed to talkToSID. callSID: ${callSid} conferenceName: ${conferenceName}`, error);
+        return {
+            success: false,
+            action: verb,
+            message: `${callSid} "${conferenceName}" ${error.message}`,
+        };
+    }
+}
+
+async function guardianCommand(verb, postName, conferenceName) {
+    if (!conferenceName) {
+        const msg = `Conference name is required`;
+        log.error(verb + ': ' + msg);
+        return { success: false, action: verb, message: msg };
+    }
+
+    log.info(`${verb} "${conferenceName}"`);
+
+    const postData = `conferenceName=${encodeURIComponent(conferenceName)}`;
+
+    try {
+        const options = createPOSTOptions(postName, postData);
+        const response = await sendPOSTrequest(options, postData);
+        return {
+            success: true,
+            action: verb,
+            message: `"${conferenceName}"`,
+            data: response,
+        };
+    } catch (error) {
+        log.error(`Failed to ${verb}: conferenceName: "${conferenceName}"`, error);
+        return {
+            success: false,
+            action: verb,
+            message: `"${conferenceName}" ${error.message}`,
         };
     }
 }
@@ -112,9 +175,11 @@ async function sayPhraseAndHangup(callSid, phrase) {
 }
 
 async function handlePhrase(phrase, track, callSid, conferenceName) {
+    const verb = 'handlePhrase';
     if (!phrase) {
-        log.error('Phrase is required');
-        return { success: false, action: 'error', message: 'Phrase is required' };
+        const msg = `Phrase is required`;
+        log.error(verb + ': ' + msg);
+        return { success: false, action: verb, message: msg };
     }
 
     try {
@@ -129,53 +194,40 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
                 const result = await sayPhraseAndHangup(callSid, signOff);
                 return {
                     ...result,
-                    message: 'Hangup command processed',
-                    originalPhrase: phrase,
                 };
             } else if (cmd === 'addParticipant') {
-                if (!conferenceName) {
-                    log.error('Conference name is required for addParticipant command');
-                    return {
-                        success: false,
-                        action: 'error',
-                        message: 'Conference name required for addParticipant command',
-                        originalPhrase: phrase,
-                    };
-                }
                 // Hardcoded Guardian phone number. TODO: get from DB
                 const result = await addParticipant('+12063498679', conferenceName);
                 return {
                     ...result,
-                    message: 'Participant added through command',
-                    originalPhrase: phrase,
                 };
-            } else {
-                log.warn(`Unknown command: ${cmd}`);
+            } else if (cmd === 'talkToSID') {
+                const result = await talkToSID(callSid, conferenceName);
                 return {
-                    success: false,
-                    action: 'unknownCommand',
-                    message: `Unknown command: ${cmd}`,
-                    originalPhrase: phrase,
+                    ...result,
+                };
+            } else if (cmd === 'talkToAll' || cmd === 'hangupAll' || cmd === 'dropOffCall' || cmd === 'monitorCall') {
+                const postName = 'guardian/' + cmd;
+                const result = await guardianCommand(cmd, postName, conferenceName);
+                return {
+                    ...result,
                 };
             }
         }
 
         // If we get here, either it wasn't a command or wasn't a recognized command
-        log.info(`Phrase not a recognized command: ${JSON.stringify(phrase)}`);
+        log.info(`${verb} not a recognized command: ${JSON.stringify(phrase)}`);
+
         const result = await sayPhraseAndHangup(callSid, 'Scam detected. Goodbye');
         return {
             ...result,
-            action: 'defaultHangup',
-            message: 'Default hangup executed for unrecognized command',
-            originalPhrase: phrase,
         };
     } catch (error) {
-        log.error('Error handling phrase', error);
+        log.error(`${verb}`, error);
         return {
             success: false,
-            action: 'error',
-            message: `Error handling phrase: ${error.message}`,
-            originalPhrase: phrase,
+            action: verb,
+            message: `${error.message}`,
         };
     }
 }
