@@ -175,6 +175,9 @@ async function sayPhraseAndHangup(callSid, phrase) {
 }
 
 async function handlePhrase(phrase, track, callSid, conferenceName) {
+
+    log.info(`handlePhrase: ${JSON.stringify(phrase)}`);
+
     const verb = 'handlePhrase';
     if (!phrase) {
         const msg = `Phrase is required`;
