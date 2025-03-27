@@ -17,7 +17,6 @@ require('dotenv').config();
 const TRACK_INBOUND = 'inbound';
 const TRACK_OUTBOUND = 'outbound';
 const INITIAL_THROTTLE_INTERVAL = 20;
-const MAX_BUFFER_SIZE = 32 * 1024;
 
 // Helper function for simdjson lazyParse
 function getValueOrDefault(parsedDoc, path, defaultValue) {
@@ -47,8 +46,8 @@ class CallSession {
         this.inboundPackets = 0;
 
         this.audioBuffer = {
-            inbound: new FastBuffer(1024),
-            outbound: new FastBuffer(1024)
+            inbound: new FastBuffer(16384),
+            outbound: new FastBuffer(16384),
         };
 
         this.audioAccumulatorSize = { inbound: 0, outbound: 0 };
@@ -215,7 +214,7 @@ class CallSession {
             growthMetric = this.metrics.bufferGrowth[track];
         }
 
-        this.audioBuffer[ track ].append( buffer );
+        this.audioBuffer[track].append(buffer);
 
         if (WANT_MONITORING) {
             growthMetric.push(buffer.length);
@@ -231,7 +230,7 @@ class CallSession {
             }
         }
 
-        if (this.audioBuffer[ track ].length() >= this.bufferSizeThreshold[track]) {
+        if (this.audioBuffer[track].length() >= this.bufferSizeThreshold[track]) {
             this.#flushAudioBuffer(track);
             return;
         }
@@ -244,13 +243,13 @@ class CallSession {
     #flushAudioBuffer(track) {
         this.#stopFlushTimer(track);
 
-        const offset = this.audioBuffer[ track ].length();
+        const offset = this.audioBuffer[track].length();
         if (0 === offset) {
             this.#startFlushTimer(track);
             return;
         }
 
-        const audioBufferCombined = this.audioBuffer[ track ].getBuffer();
+        const audioBufferCombined = this.audioBuffer[track].getBuffer();
         const bufferSize = audioBufferCombined.length;
         const sttService = this.sttService[track];
         const now = performance.now();
@@ -287,7 +286,7 @@ class CallSession {
             log.error(`Error sending ${track} audio to Deepgram`, err);
             this.consecutiveErrors[track]++;
         } finally {
-            this.audioBuffer[ track ].reset();
+            this.audioBuffer[track].reset();
 
             const procTime = performance.now() - this.processingStartTime[track];
             this.lastProcessingTime[track] = procTime;
@@ -314,7 +313,8 @@ class CallSession {
         this.#startFlushTimer(track);
     }
 
-    handleMessage(message, isBinary) { // PUBLIC METHOD
+    handleMessage(message, isBinary) {
+        // PUBLIC METHOD
         if (!this.active) return;
 
         let data;
@@ -361,7 +361,7 @@ class CallSession {
     }
 
     #handleTranscript(transcript, isFinal, track) {
-        if (!this.active ) return;
+        if (!this.active) return;
 
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
 
@@ -385,7 +385,8 @@ class CallSession {
         this.#stopFlushTimer(TRACK_OUTBOUND);
     }
 
-    cleanup() { // PUBLIC METHOD
+    cleanup() {
+        // PUBLIC METHOD
         if (!this.active) return;
 
         if (WANT_MONITORING) {
@@ -408,7 +409,7 @@ class CallSession {
                 stt[direction].cleanup();
                 this.sttService[direction] = null;
             }
-        }        
+        }
 
         log.info(
             `Call session cleaned up, Call SID: ${this.callSid || 'unknown'}, processed ${this.receivedPackets} packets`
