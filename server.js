@@ -311,7 +311,7 @@ class CallSession {
         try {
             // uWS always gives ArrayBuffer.  Need to convert to string.
             // lazyParse = good speedup
-            data = simdjson.lazyParse(Buffer.from(message).toString('utf8'));
+            data = simdjson.lazyParse(this.decoder.decode(message));
 
             let event = data.valueForKeyPath('event');
 

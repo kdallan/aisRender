@@ -6,7 +6,7 @@ const scamPhrases = [
     { phrase: 'add participant', type: 'cmd:addParticipant' },
     { phrase: 'talk to sid', type: 'cmd:talkToSID' },
     { phrase: 'talk to all', type: 'cmd:talkToAll' },
-    { phrase: 'hangup all', type: 'cmd:hangupAll' },
+    { phrase: 'end call', type: 'cmd:hangupAll' },
     { phrase: 'drop off call', type: 'cmd:dropOffCall' },
     { phrase: 'monitor call', type: 'cmd:monitorCall' },
 

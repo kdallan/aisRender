@@ -5,6 +5,10 @@ const twilio = require('twilio');
 const log = pino({ base: null });
 const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = require('./config');
 
+const POST_conferenceID = "Conference_ID";
+const POST_callSID = "SID";
+const POST_phoneNumber = "Phone_Number";
+
 function createPOSTOptions(restFunction, postData) {
     return {
         hostname: 'createconference-2381.twil.io',
@@ -53,7 +57,7 @@ async function addParticipant(phoneNumber, conferenceName) {
 
     log.info(`${verb} ${phoneNumber} "${conferenceName}"`);
 
-    const postData = `phoneNumber=${encodeURIComponent(phoneNumber)}&conferenceName=${encodeURIComponent(
+    const postData = `${POST_phoneNumber}=${encodeURIComponent(phoneNumber)}&${POST_conferenceID}=${encodeURIComponent(
         conferenceName
     )}`;
 
@@ -86,7 +90,7 @@ async function talkToSID(callSid, conferenceName) {
 
     log.info(`${verb} ${callSid} "${conferenceName}"`);
 
-    const postData = `callSID=${encodeURIComponent(callSid)}&conferenceName=${encodeURIComponent(conferenceName)}`;
+    const postData = `${POST_callSID}=${encodeURIComponent(callSid)}&${POST_conferenceID}=${encodeURIComponent(conferenceName)}`;
 
     try {
         const options = createPOSTOptions('guardian/talkToSID', postData);
@@ -116,7 +120,7 @@ async function guardianCommand(verb, postName, conferenceName) {
 
     log.info(`${verb} "${conferenceName}"`);
 
-    const postData = `conferenceName=${encodeURIComponent(conferenceName)}`;
+    const postData = `${POST_conferenceID}=${encodeURIComponent(conferenceName)}`;
 
     try {
         const options = createPOSTOptions(postName, postData);
@@ -175,7 +179,6 @@ async function sayPhraseAndHangup(callSid, phrase) {
 }
 
 async function handlePhrase(phrase, track, callSid, conferenceName) {
-
     log.info(`handlePhrase: ${JSON.stringify(phrase)}`);
 
     const verb = 'handlePhrase';
