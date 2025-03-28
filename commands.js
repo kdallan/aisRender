@@ -33,13 +33,15 @@ const GUARDIAN_COMMANDS = {
  * @returns {Object} HTTP request options
  */
 function createPOSTOptions(restFunction, postData) {
+    const credentials = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+
     return {
         hostname: API_CONFIG.hostname,
         path: '/' + restFunction,
         method: 'POST',
         timeout: API_CONFIG.timeout,
         headers: {
-            Authorization: 'Bearer ' + `${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`,
+            Authorization: 'Basic ' + credentials,
             'Content-Type': 'application/x-www-form-urlencoded',
             'Content-Length': Buffer.byteLength(postData),
         },
