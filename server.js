@@ -168,22 +168,22 @@ class CallSession {
     #startFlushTimer(track) {
         // Cancel the previous timer, if any
         this.#stopFlushTimer(track);
-    
+
         if (!this.active || this.isShuttingDown) {
             return;
         }
-    
+
         // Adaptive interval based on processing time
         const baseInterval = this.flushInterval[track];
         const processingTime = this.lastProcessingTime[track];
         let interval = baseInterval;
-    
+
         // Track historical performance for more stable adjustments
         if (!this.processingTimeHistory) {
             this.processingTimeHistory = { inbound: [], outbound: [] };
             this.processingTimeHistoryMaxLength = 5; // Keep track of last 5 processing times
         }
-        
+
         // Add current processing time to history
         if (processingTime > 0) {
             this.processingTimeHistory[track].push(processingTime);
@@ -192,12 +192,14 @@ class CallSession {
                 this.processingTimeHistory[track].shift();
             }
         }
-        
+
         // Calculate average processing time from history for more stable adjustments
-        const avgProcessingTime = this.processingTimeHistory[track].length > 0 
-            ? this.processingTimeHistory[track].reduce((sum, time) => sum + time, 0) / this.processingTimeHistory[track].length 
-            : processingTime;
-    
+        const avgProcessingTime =
+            this.processingTimeHistory[track].length > 0
+                ? this.processingTimeHistory[track].reduce((sum, time) => sum + time, 0) /
+                  this.processingTimeHistory[track].length
+                : processingTime;
+
         // If processing is taking longer, increase the interval proportionally
         if (avgProcessingTime > baseInterval) {
             // The adjustment factor (1.25) provides some headroom
@@ -208,13 +210,13 @@ class CallSession {
             // This creates a more adaptive response instead of a fixed reduction
             const speedRatio = avgProcessingTime / baseInterval;
             const reductionFactor = 1 - speedRatio; // How much faster we're processing
-            
+
             // Apply a proportional reduction, more reduction for faster processing
             // but with diminishing returns to prevent oscillation
             const reduction = baseInterval * reductionFactor * 0.5; // 0.5 dampening factor
             interval = Math.max(baseInterval - reduction, 10); // Minimum 10ms
         }
-    
+
         if (WANT_MONITORING) {
             if (avgProcessingTime > baseInterval) {
                 this.metrics.delays[track] = avgProcessingTime - baseInterval;
@@ -222,7 +224,7 @@ class CallSession {
                 this.metrics.delays[track] = 0;
             }
         }
-    
+
         this.flushTimer[track] = setTimeout(() => {
             this.#flushAudioBuffer(track);
         }, interval);
@@ -389,7 +391,13 @@ class CallSession {
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
-            handlePhrase(hit, track, this.callSid, this.conferenceName);
+            handlePhrase(hit, track, this.callSid, this.conferenceName)
+                .then((result) => {
+                    console.log('handlePhrase result:', result);
+                })
+                .catch((error) => {
+                    console.error('handlePhrase error:', error);
+                });
         }
     }
 
