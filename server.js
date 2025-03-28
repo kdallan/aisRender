@@ -46,8 +46,8 @@ class CallSession {
         this.processingStartTime = { inbound: 0, outbound: 0 };
         this.lastProcessingTime = { inbound: 0, outbound: 0 };
 
-        // ADAPTIVE BUFFER MANAGEMENT - Add parameters
-        this.bufferSizeThreshold = { inbound: 2048, outbound: 2048 }; // 2 KB initially
+        // ADAPTIVE BUFFER MANAGEMENT
+        this.bufferSizeThreshold = { inbound: 512, outbound: 512 };
         this.flushTimer = { inbound: null, outbound: null };
         this.flushInterval = {
             inbound: INITIAL_THROTTLE_INTERVAL,
@@ -168,32 +168,61 @@ class CallSession {
     #startFlushTimer(track) {
         // Cancel the previous timer, if any
         this.#stopFlushTimer(track);
-
+    
         if (!this.active || this.isShuttingDown) {
             return;
         }
-
+    
         // Adaptive interval based on processing time
         const baseInterval = this.flushInterval[track];
         const processingTime = this.lastProcessingTime[track];
         let interval = baseInterval;
-
-        // If processing is taking longer, increase the interval
-        const processingTakingLonger = processingTime > baseInterval;
-        if (processingTakingLonger) {
-            interval = Math.min(processingTime * 1.25, 100); // Cap at 100ms
-        } else {
-            interval = Math.max(baseInterval - 5, 10); // Try to catch up, but not too fast
+    
+        // Track historical performance for more stable adjustments
+        if (!this.processingTimeHistory) {
+            this.processingTimeHistory = { inbound: [], outbound: [] };
+            this.processingTimeHistoryMaxLength = 5; // Keep track of last 5 processing times
         }
-
+        
+        // Add current processing time to history
+        if (processingTime > 0) {
+            this.processingTimeHistory[track].push(processingTime);
+            // Keep history at desired length
+            if (this.processingTimeHistory[track].length > this.processingTimeHistoryMaxLength) {
+                this.processingTimeHistory[track].shift();
+            }
+        }
+        
+        // Calculate average processing time from history for more stable adjustments
+        const avgProcessingTime = this.processingTimeHistory[track].length > 0 
+            ? this.processingTimeHistory[track].reduce((sum, time) => sum + time, 0) / this.processingTimeHistory[track].length 
+            : processingTime;
+    
+        // If processing is taking longer, increase the interval proportionally
+        if (avgProcessingTime > baseInterval) {
+            // The adjustment factor (1.25) provides some headroom
+            // The cap (60ms) prevents excessive delays
+            interval = Math.min(avgProcessingTime * 1.25, 60);
+        } else if (avgProcessingTime > 0) {
+            // If processing is faster, decrease interval proportionally to the speed difference
+            // This creates a more adaptive response instead of a fixed reduction
+            const speedRatio = avgProcessingTime / baseInterval;
+            const reductionFactor = 1 - speedRatio; // How much faster we're processing
+            
+            // Apply a proportional reduction, more reduction for faster processing
+            // but with diminishing returns to prevent oscillation
+            const reduction = baseInterval * reductionFactor * 0.5; // 0.5 dampening factor
+            interval = Math.max(baseInterval - reduction, 10); // Minimum 10ms
+        }
+    
         if (WANT_MONITORING) {
-            if (processingTakingLonger) {
-                this.metrics.delays[track] = processingTime - baseInterval;
+            if (avgProcessingTime > baseInterval) {
+                this.metrics.delays[track] = avgProcessingTime - baseInterval;
             } else {
                 this.metrics.delays[track] = 0;
             }
         }
-
+    
         this.flushTimer[track] = setTimeout(() => {
             this.#flushAudioBuffer(track);
         }, interval);
@@ -208,15 +237,15 @@ class CallSession {
         }
 
         let audioBuffer = this.audioBuffer[track];
-        audioBuffer.append(buffer);        
+        audioBuffer.append(buffer);
 
-        // Adjust the flush threshold based on previous processing time.
+        // Adjust the flush size threshold based on previous processing time.
         const pTime = this.lastProcessingTime[track];
         if (pTime > 0) {
             if (pTime < 10) {
-                this.bufferSizeThreshold[track] = Math.max(128, this.bufferSizeThreshold[track] - 128);
+                this.bufferSizeThreshold[track] = Math.max(128, this.bufferSizeThreshold[track] - 32);
             } else if (pTime > 50) {
-                this.bufferSizeThreshold[track] = Math.min(2 * 1024, this.bufferSizeThreshold[track] + 256);
+                this.bufferSizeThreshold[track] = Math.min(768, this.bufferSizeThreshold[track] + 64);
             }
         }
 
@@ -315,20 +344,20 @@ class CallSession {
 
             let event = data.valueForKeyPath('event');
 
+            // Optimization. 'media' is by far the most common event. Check first.
+            if (event === 'media') {
+                this.receivedPackets++;
+                let payload = data.valueForKeyPath('media.payload'); // Not optional
+                let track = data.valueForKeyPath('media.track'); // Not optional
+
+                if (track === TRACK_INBOUND || track === TRACK_OUTBOUND) {
+                    this.inboundPackets++;
+                    this.#accumulateAudio(Buffer.from(payload, 'base64'), track);
+                }
+                return;
+            }
+
             switch (event) {
-                case 'media':
-                    {
-                        this.receivedPackets++;
-                        let payload = data.valueForKeyPath('media.payload'); // Not optional
-                        let track = data.valueForKeyPath('media.track'); // Not optional
-
-                        if (track === TRACK_INBOUND || track === TRACK_OUTBOUND) {
-                            this.inboundPackets++;
-                            this.#accumulateAudio(Buffer.from(payload, 'base64'), track);
-                        }
-                    }
-                    break;
-
                 case 'connected':
                     log.info('Twilio: Connected event received');
                     break;
@@ -397,7 +426,7 @@ class CallSession {
         for (const direction of directions) {
             if (stt?.[direction]) {
                 stt[direction].cleanup();
-                this.sttService[direction] = null;
+                stt[direction] = null;
             }
         }
 

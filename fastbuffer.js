@@ -20,7 +20,7 @@ class FastBuffer {
     }
 
     append(chunk) {
-    	if( chunk.length === 0 ) return;
+    	if( !chunk || chunk.length === 0 ) return;
         
         let total = this.offset + chunk.length
         if (total > this.buffer.length) {
