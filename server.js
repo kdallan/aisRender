@@ -433,22 +433,24 @@ class CallSession {
 
             this.processingCommand = true;
             let now = performance.now();
-            if (this.lastCommandTime && ((now - this.lastCommandTime) < 5000)) { // 5 second cooldown
+            if (this.lastCommandTime && ((now - this.lastCommandTime) < 20000)) { // 20 second cooldown
                 log.info(`Ignoring scam phrase hit due to cooldown: ${hit}`);
                 this.processingCommand = false;
                 return;
             }
-
+            
             this.lastCommandTime = now;
+            log.info(`handleTranscript: : timestamping command`);
+
             handlePhrase(hit, track, this.callSid, this.conferenceUUID)
                 .then((result) => {
-                    console.log('handleTranscript result:', result);
+                    log.info('handleTranscript: result:', result);
 
-                    this.#processReturnedCommandJSON(result);
+                    this.#processReturnedCommandJSON(result?.data);
                     this.processingCommand = false;
                 })
                 .catch((error) => {
-                    console.error('handleTranscript error:', error);
+                    log.error('handleTranscript: error:', error);
                     this.processingCommand = false;
                 });
         }
