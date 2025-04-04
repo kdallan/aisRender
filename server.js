@@ -357,7 +357,7 @@ class CallSession {
                 // Create transcript history on the fly
                 if (!this.transcriptHistory[track]) {
                     this.transcriptHistory[track] = new TranscriptHistory(
-                        this.actor === 'SUB' ? scamPhrasesSUB : this.actor === 'OPY' ? scamPhrasesOPY : scamPhrasesGDN
+                        this.actor === 'SUB' ? scamPhrasesSUB : this.actor === 'GDN' ? scamPhrasesGDN : scamPhrasesOPY
                     );
                 }
 
@@ -404,7 +404,7 @@ class CallSession {
         try {
             json = JSON.parse(jsonString); // Not using the shared simdjson here
         } catch (error) {
-            log.error('processReturnedCommandJSON: error parsing "${jsonString}"', error);
+            log.error(`processReturnedCommandJSON: error parsing "${jsonString}"`, error);
             return;
         }
 
@@ -426,7 +426,7 @@ class CallSession {
     #handleTranscript(transcript, isFinal, track) {
         if (!this.active || !this.transcriptHistory[track]) return;
 
-        log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
+        log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}]${this.actor} ${transcript}`);
 
         const history = this.transcriptHistory[track];
         history.push(transcript);
@@ -434,28 +434,28 @@ class CallSession {
         let hit = history.findScamPhrases();
         if (hit !== null) {
             if (this.processingCommand) {
-                log.info(`Ignoring scam phrase hit while processing command: ${hit}`);
+                log.info(`[${this.actor}] Ignoring scam phrase hit while processing command: ${hit}`);
                 return;
             }
 
             this.processingCommand = true;
             let now = performance.now();
             if (this.lastCommandTime && now - this.lastCommandTime < 10000) {
-                log.info(`Ignoring scam phrase hit due to cooldown: ${hit}`);
+                log.info(`[${this.actor}] Ignoring scam phrase hit due to cooldown: ${hit}`);
                 this.processingCommand = false;
                 return;
             }
 
             this.lastCommandTime = now;
-            log.info(`handleTranscript: : timestamping command`);
+            log.info(`[${this.actor}] handleTranscript: : timestamping command`);
 
             handlePhrase(hit, track, this.callSid, this.conferenceUUID)
                 .then((result) => {
-                    log.info('handleTranscript: result:', result);
+                    log.info('[${this.actor}] handleTranscript: result:', result);
                     this.#processReturnedCommandJSON(result?.data);
                 })
                 .catch((error) => {
-                    log.error('handleTranscript: error:', error);
+                    log.error('[${this.actor}] handleTranscript: error:', error);
                 })
                 .finally(() => {
                     this.processingCommand = false;
