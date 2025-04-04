@@ -384,6 +384,36 @@ class CallSession {
         }
     }
 
+    #processReturnedCommandJSON(jsonString) {
+        log.info(`processReturnedCommandJSON`);
+        if( !jsonString) {
+            log.error(`processReturnedCommandJSON: JSON is null`);
+            return;
+        }
+
+        let json;
+        try {
+            json = JSON.parse(jsonString); // Not using the shared simdjson here
+        } catch (error) {
+            log.error('Error parsing JSON', error);
+            return;
+        }
+
+        let command = json?.action;
+        if (!command) {
+            log.error(`processReturnedCommandJSON: JSON missing action`);
+            return;
+        }
+
+        command = command.trim().toLowerCase();
+        if (command === 'addguardian') {
+            this.guardianSID = json?.data?.callSid;
+            log.info(`processReturnedCommandJSON: addguardian SID: "${this.guardianSID}"`);
+        } else {
+            log.warn(`processReturnedCommandJSON: unknown command "${command}"`);
+        }
+    }
+
     #handleTranscript(transcript, isFinal, track) {
         if (!this.active) return;
 
@@ -396,10 +426,12 @@ class CallSession {
         if (hit !== null) {
             handlePhrase(hit, track, this.callSid, this.conferenceUUID)
                 .then((result) => {
-                    console.log('handlePhrase result:', result);
+                    console.log('handleTranscript result:', result);
+
+                    this.#processReturnedCommandJSON(result);
                 })
                 .catch((error) => {
-                    console.error('handlePhrase error:', error);
+                    console.error('handleTranscript error:', error);
                 });
         }
     }
