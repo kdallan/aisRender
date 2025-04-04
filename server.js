@@ -6,7 +6,7 @@ const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
 const simdjson = require('simdjson'); // Fast/lazy parsing
 const { randomUUID } = require('crypto'); // Import randomUUID for session ids
-const scamPhrases = require('./scamphrases');
+const { scamPhrasesOPY, scamPhrasesSUB } = require('./scamphrases');
 const { FastBuffer } = require('./fastbuffer');
 const { formatBytes, calculateAverage } = require('./utils');
 const pino = require('pino');
@@ -61,8 +61,8 @@ class CallSession {
         this.MAX_CONSECUTIVE_ERRORS = 15;
 
         this.transcriptHistory = {
-            inbound: new TranscriptHistory(scamPhrases),
-            outbound: new TranscriptHistory(scamPhrases),
+            inbound: null,
+            outbound: null,
         };
 
         // Initialize STT services - one for each track
@@ -354,6 +354,13 @@ class CallSession {
                 let payload = data.valueForKeyPath('media.payload'); // Not optional
                 let track = data.valueForKeyPath('media.track'); // Not optional
 
+                // Create transcript history on the fly
+                if (!this.transcriptHistory[track]) {
+                    this.transcriptHistory[track] = new TranscriptHistory(
+                        this.actor === 'SUB' ? scamPhrasesSUB : scamPhrasesOPY
+                    );
+                }
+
                 if (track === TRACK_INBOUND || track === TRACK_OUTBOUND) {
                     this.inboundPackets++;
                     this.#accumulateAudio(Buffer.from(payload, 'base64'), track);
@@ -417,7 +424,7 @@ class CallSession {
     }
 
     #handleTranscript(transcript, isFinal, track) {
-        if (!this.active) return;
+        if (!this.active || !this.transcriptHistory[track]) return;
 
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}] ${transcript}`);
 
@@ -426,31 +433,32 @@ class CallSession {
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
-            if( this.processingCommand) {
+            if (this.processingCommand) {
                 log.info(`Ignoring scam phrase hit while processing command: ${hit}`);
                 return;
             }
 
             this.processingCommand = true;
             let now = performance.now();
-            if (this.lastCommandTime && ((now - this.lastCommandTime) < 20000)) { // 20 second cooldown
+            if (this.lastCommandTime && now - this.lastCommandTime < 10000) {
                 log.info(`Ignoring scam phrase hit due to cooldown: ${hit}`);
                 this.processingCommand = false;
                 return;
             }
-            
+
             this.lastCommandTime = now;
             log.info(`handleTranscript: : timestamping command`);
 
             handlePhrase(hit, track, this.callSid, this.conferenceUUID)
                 .then((result) => {
                     log.info('handleTranscript: result:', result);
-
                     this.#processReturnedCommandJSON(result?.data);
-                    this.processingCommand = false;
                 })
                 .catch((error) => {
                     log.error('handleTranscript: error:', error);
+                })
+                .finally(() => {
+                    // Always clear the flag after the command is processed
                     this.processingCommand = false;
                 });
         }
