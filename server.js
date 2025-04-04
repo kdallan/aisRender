@@ -32,7 +32,7 @@ function getValueOrDefault(parsedDoc, path, defaultValue) {
 class CallSession {
     constructor() {
         this.callSid = null;
-        this.conferenceName = '';
+        this.conferenceUUID = '';
         this.active = true;
         this.receivedPackets = 0;
         this.inboundPackets = 0;
@@ -367,8 +367,11 @@ class CallSession {
                 case 'start':
                     this.callSid = getValueOrDefault(data, 'start.callSid', null); // Optional
                     log.info(`Twilio: Call started, SID: ${this.callSid}`);
-                    this.conferenceName = getValueOrDefault(data, 'start.customParameters.conferenceName', ''); // Optional
-                    log.info(`\tConference name: ${this.conferenceName}`);
+                    this.conferenceUUID = getValueOrDefault(data, 'start.customParameters.conferenceUUID', ''); // Optional
+                    log.info(`\tConference name: ${this.conferenceUUID}`);
+                    this.actor = getValueOrDefault(data, 'start.customParameters.actor', ''); // Optional: 'SUB', 'OPY', 'GDN'
+                    log.info(`\tActor: ${this.actor}`);
+                    this.guardianSID = ''; // Get this from 'addGuardian' event. If actor is 'GDN', callSID is the guardianSID
                     break;
 
                 case 'close':
@@ -391,7 +394,7 @@ class CallSession {
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
-            handlePhrase(hit, track, this.callSid, this.conferenceName)
+            handlePhrase(hit, track, this.callSid, this.conferenceUUID)
                 .then((result) => {
                     console.log('handlePhrase result:', result);
                 })

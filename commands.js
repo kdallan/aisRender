@@ -7,9 +7,10 @@ const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = require('./config');
 
 // Constants
 const POST_FIELDS = {
-    CONFERENCE_ID: 'Conference_ID',
-    CALL_SID: 'SID',
-    PHONE_NUMBER: 'Phone_Number',
+    CONFERENCE_ID: 'conferenceUUID',
+    CALL_SID: 'callSID',
+    PHONE_NUMBER: 'telephoneNumber',
+    GUARDIAN_SID: 'guardianSID',
 };
 
 const API_CONFIG = {
@@ -110,13 +111,13 @@ function isValidCallSid(callSid) {
 }
 
 /**
- * Adds a participant to a conference
+ * Adds the guardian to a conference
  * @param {string} phoneNumber - Participant's phone number
  * @param {string} conferenceName - Conference name
  * @returns {Promise<Object>} Result of the operation
  */
-async function addParticipant(phoneNumber, conferenceName) {
-    const verb = 'addParticipant';
+async function addGuardian(phoneNumber, conferenceName) {
+    const verb = 'addGuardian';
 
     // Validate inputs
     if (!phoneNumber || !conferenceName) {
@@ -352,7 +353,7 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
 
                 case 'addParticipant': {
                     const guardianPhone = getGuardianPhoneNumber();
-                    return await addParticipant(guardianPhone, conferenceName);
+                    return await addGuardian(guardianPhone, conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.TALK_TO_SID: {
