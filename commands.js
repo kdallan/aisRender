@@ -188,6 +188,8 @@ async function talkToSID(callSid, conferenceName) {
         POST_FIELDS.CONFERENCE_ID
     }=${encodeURIComponent(conferenceName)}`;
 
+    log.info(`POST data: ${postData}`);
+
     try {
         const options = createPOSTOptions('guardian/talkToSID', postData);
         const response = await sendPOSTrequest(options, postData);
@@ -224,6 +226,8 @@ async function guardianCommand(verb, postName, conferenceName) {
     log.info(`${verb} "${conferenceName}"`);
 
     const postData = `${POST_FIELDS.CONFERENCE_ID}=${encodeURIComponent(conferenceName)}`;
+
+    log.info(`POST data: ${postData}`);
 
     try {
         const options = createPOSTOptions(postName, postData);
