@@ -37,6 +37,8 @@ class CallSession {
         this.receivedPackets = 0;
         this.inboundPackets = 0;
         this.decoder = new TextDecoder('utf-8');
+        this.processingCommand = false;
+        this.lastCommandTime = null;
 
         this.audioBuffer = {
             inbound: new FastBuffer(16384),
@@ -386,7 +388,7 @@ class CallSession {
 
     #processReturnedCommandJSON(jsonString) {
         log.info(`processReturnedCommandJSON`);
-        if( !jsonString) {
+        if (!jsonString) {
             log.error(`processReturnedCommandJSON: JSON is null`);
             return;
         }
@@ -395,7 +397,7 @@ class CallSession {
         try {
             json = JSON.parse(jsonString); // Not using the shared simdjson here
         } catch (error) {
-            log.error('Error parsing JSON', error);
+            log.error('processReturnedCommandJSON: error parsing JSON', error);
             return;
         }
 
@@ -424,14 +426,30 @@ class CallSession {
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
+            if( this.processingCommand) {
+                log.info(`Ignoring scam phrase hit while processing command: ${hit}`);
+                return;
+            }
+
+            this.processingCommand = true;
+            let now = performance.now();
+            if (this.lastCommandTime && ((now - this.lastCommandTime) < 5000)) { // 5 second cooldown
+                log.info(`Ignoring scam phrase hit due to cooldown: ${hit}`);
+                this.processingCommand = false;
+                return;
+            }
+
+            this.lastCommandTime = now;
             handlePhrase(hit, track, this.callSid, this.conferenceUUID)
                 .then((result) => {
                     console.log('handleTranscript result:', result);
 
                     this.#processReturnedCommandJSON(result);
+                    this.processingCommand = false;
                 })
                 .catch((error) => {
                     console.error('handleTranscript error:', error);
+                    this.processingCommand = false;
                 });
         }
     }
