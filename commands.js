@@ -140,7 +140,7 @@ async function addGuardian(phoneNumber, conferenceName) {
     }=${encodeURIComponent(conferenceName)}`;
 
     try {
-        const options = createPOSTOptions('add-participant', postData);
+        const options = createPOSTOptions('addGuardian', postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,

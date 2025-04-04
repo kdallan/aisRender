@@ -2,7 +2,7 @@ const scamPhrases = [
     { phrase: 'hangup', type: 'cmd:hangup', signOff: 'Caller hanging up. Goodbye' },
     { phrase: 'hang up', type: 'cmd:hangup', signOff: 'Caller hanging up. Goodbye' },
 
-    { phrase: 'add participant', type: 'cmd:addParticipant' },
+    { phrase: 'add guardian', type: 'cmd:addParticipant' },
     { phrase: 'talk to sid', type: 'cmd:talkToSID' },
     { phrase: 'talk to all', type: 'cmd:talkToAll' },
     { phrase: 'end call', type: 'cmd:hangupAll' },
