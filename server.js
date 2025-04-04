@@ -6,7 +6,7 @@ const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
 const simdjson = require('simdjson'); // Fast/lazy parsing
 const { randomUUID } = require('crypto'); // Import randomUUID for session ids
-const { scamPhrasesOPY, scamPhrasesSUB } = require('./scamphrases');
+const { scamPhrasesOPY, scamPhrasesSUB, scamPhrasesGDN } = require('./scamphrases');
 const { FastBuffer } = require('./fastbuffer');
 const { formatBytes, calculateAverage } = require('./utils');
 const pino = require('pino');
@@ -357,7 +357,7 @@ class CallSession {
                 // Create transcript history on the fly
                 if (!this.transcriptHistory[track]) {
                     this.transcriptHistory[track] = new TranscriptHistory(
-                        this.actor === 'SUB' ? scamPhrasesSUB : scamPhrasesOPY
+                        this.actor === 'SUB' ? scamPhrasesSUB : this.actor === 'OPY' ? scamPhrasesOPY : scamPhrasesGDN
                     );
                 }
 
@@ -404,7 +404,7 @@ class CallSession {
         try {
             json = JSON.parse(jsonString); // Not using the shared simdjson here
         } catch (error) {
-            log.error('processReturnedCommandJSON: error parsing JSON', error);
+            log.error('processReturnedCommandJSON: error parsing "${jsonString}"', error);
             return;
         }
 
@@ -458,7 +458,6 @@ class CallSession {
                     log.error('handleTranscript: error:', error);
                 })
                 .finally(() => {
-                    // Always clear the flag after the command is processed
                     this.processingCommand = false;
                 });
         }
