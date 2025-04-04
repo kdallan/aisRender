@@ -426,7 +426,7 @@ class CallSession {
     #handleTranscript(transcript, isFinal, track) {
         if (!this.active || !this.transcriptHistory[track]) return;
 
-        log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}]${this.actor} ${transcript}`);
+        log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}][${this.actor}] ${transcript}`);
 
         const history = this.transcriptHistory[track];
         history.push(transcript);
@@ -451,11 +451,11 @@ class CallSession {
 
             handlePhrase(hit, track, this.callSid, this.conferenceUUID)
                 .then((result) => {
-                    log.info('[${this.actor}] handleTranscript: result:', result);
+                    log.info(`[${this.actor}] handleTranscript: result:`, result);
                     this.#processReturnedCommandJSON(result?.data);
                 })
                 .catch((error) => {
-                    log.error('[${this.actor}] handleTranscript: error:', error);
+                    log.error(`[${this.actor}] handleTranscript: error:`, error);
                 })
                 .finally(() => {
                     this.processingCommand = false;
