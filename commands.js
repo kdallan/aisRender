@@ -139,6 +139,8 @@ async function addGuardian(phoneNumber, conferenceName) {
         POST_FIELDS.CONFERENCE_ID
     }=${encodeURIComponent(conferenceName)}`;
 
+    log.info(`POST data: ${postData}`);
+
     try {
         const options = createPOSTOptions('addGuardian', postData);
         const response = await sendPOSTrequest(options, postData);
