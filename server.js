@@ -433,6 +433,8 @@ class CallSession {
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
+            history.reset();
+
             if (this.processingCommand) {
                 log.info(`[${this.actor}] Ignoring scam phrase hit while processing command: ${hit}`);
                 return;

@@ -93,6 +93,12 @@ class TranscriptHistory {
         return result;
     }
 
+    reset() {
+        this.buffer = new Array(this.maxWords);
+        this.start = 0;
+        this.size = 0;
+    }
+
     /**
      * Computes the maximum number of words in any phrase.
      * @param {Object[]} phrases
