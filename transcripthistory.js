@@ -1,5 +1,7 @@
 'use strict';
 const AhoCorasick = require('./ahocorasick');
+const pino = require('pino');
+const log = pino({ base: null });
 
 // Single regex to replace any non-alphanumeric sequence (excluding numbers) with a space.
 const CLEAN_REGEX = /[^a-z0-9]+/g;
@@ -22,6 +24,9 @@ class TranscriptHistory {
         this.finder = createScamDetector(phrases);
         // Determine the maximum number of words needed based on the longest phrase.
         this.maxWords = Math.max(1, this.#longestPhraseInWords(phrases));
+
+        log.info(`TranscriptHistory: maxWords = ${this.maxWords}`);
+
         // Set up a circular buffer to avoid costly shift() calls.
         this.buffer = new Array(this.maxWords);
         this.start = 0; // Points to the oldest element.

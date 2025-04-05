@@ -70,7 +70,6 @@ const commonPhrases = [
 const commonCommands = [
     { phrase: 'talk to sid', type: 'cmd:talkToSID' },
     { phrase: 'talk to all', type: 'cmd:talkToAll' },
-    // { phrase: 'end call', type: 'cmd:hangupAll' },
     { phrase: 'drop off call', type: 'cmd:dropOffCall' },
     { phrase: 'monitor call', type: 'cmd:monitorCall' },
 ];
@@ -80,7 +79,7 @@ const scamPhrasesOPY = commonPhrases;
 const scamPhrasesSUB = [{ phrase: 'add guardian', type: 'cmd:addParticipant' }, ...commonCommands, ...commonPhrases];
 
 const scamPhrasesGDN = [
-    { phrase: 'end call', type: 'cmd:hangup', signOff: 'Caller hanging up. Goodbye' },
+    { phrase: 'end call', type: 'cmd:hangupAll' },
     ...commonCommands,
 ];
 
