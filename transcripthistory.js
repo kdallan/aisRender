@@ -104,6 +104,10 @@ class TranscriptHistory {
         this.size = 0;
     }
 
+    removeCommand(command) {
+        this.finder.removeByType(command);
+    }
+
     /**
      * Computes the maximum number of words in any phrase.
      * @param {Object[]} phrases

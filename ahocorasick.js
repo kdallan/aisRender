@@ -133,7 +133,8 @@ class AhoCorasick {
      * @param {string} text  // text should be normalized: lower-case and [a-z ] only.
      * @returns {Array<{phrase: string, type: string, [command]?: object}>}
      */
-    search(text) { // PUBLIC METHOD
+    search(text) {
+        // PUBLIC METHOD
         if (!text) return [];
         const matches = [];
         const root = this.root;
@@ -170,7 +171,8 @@ class AhoCorasick {
      * @param {string} text
      * @returns {{ phrase: string, type: string, [command]?: object } | null}
      */
-    containsAny(text) { // PUBLIC METHOD
+    containsAny(text) {
+        // PUBLIC METHOD
         if (!text) return null;
         const root = this.root;
         let current = root;
@@ -195,6 +197,72 @@ class AhoCorasick {
             }
         }
         return null;
+    }
+
+    /**
+     * Remove a phrase from the automaton.
+     * @param {string} phraseToRemove - The phrase to remove (should be normalized, e.g. trimmed).
+     */
+    remove(phraseToRemove) {
+        // PUBLIC METHOD
+        // Traverse the trie to update output arrays.
+        // We use a BFS traversal while keeping track of visited nodes to avoid processing nodes multiple times.
+        const visited = new Set();
+        const queue = [this.root];
+        visited.add(this.root);
+
+        while (queue.length > 0) {
+            const node = queue.shift();
+
+            // If this node has an output array, filter out the phrase.
+            if (node.output) {
+                node.output = node.output.filter((p) => p.phrase !== phraseToRemove);
+                if (node.output.length === 0) {
+                    node.output = null;
+                }
+            }
+
+            // Enqueue all children (avoid revisiting nodes).
+            for (let i = 0; i < AHO_NODE_SIZE; i++) {
+                const child = node.goto[i];
+                if (child && !visited.has(child)) {
+                    visited.add(child);
+                    queue.push(child);
+                }
+            }
+        }
+    }
+
+    /**
+     * Remove all phrases from the automaton that match a given type.
+     * @param {string} typeToRemove - The type identifier to remove (e.g. 'cmd:talkToSID').
+     */
+    removeByType(typeToRemove) {
+        // Use BFS to traverse the trie and update output arrays.
+        const visited = new Set();
+        const queue = [this.root];
+        visited.add(this.root);
+
+        while (queue.length > 0) {
+            const node = queue.shift();
+
+            // If this node has an output array, filter out phrases with the given type.
+            if (node.output) {
+                node.output = node.output.filter((p) => p.type !== typeToRemove);
+                if (node.output.length === 0) {
+                    node.output = null;
+                }
+            }
+
+            // Enqueue all child nodes (avoid revisiting nodes).
+            for (let i = 0; i < AHO_NODE_SIZE; i++) {
+                const child = node.goto[i];
+                if (child && !visited.has(child)) {
+                    visited.add(child);
+                    queue.push(child);
+                }
+            }
+        }
     }
 }
 

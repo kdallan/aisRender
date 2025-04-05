@@ -393,31 +393,30 @@ class CallSession {
         }
     }
 
-    #processReturnedCommandJSON(jsonString) {
+    #processReturnedCommandJSON(result, track) {
         log.info(`processReturnedCommandJSON`);
-        if (!jsonString) {
-            log.error(`processReturnedCommandJSON: JSON is null`);
+        if (!result) {
+            log.error(`processReturnedCommandJSON: null result`);
             return;
         }
 
-        let json;
-        try {
-            json = JSON.parse(jsonString); // Not using the shared simdjson here
-        } catch (error) {
-            log.error(`processReturnedCommandJSON: error parsing "${jsonString}"`, error);
-            return;
-        }
-
-        let command = json?.action;
+        let command = result.action;
         if (!command) {
-            log.error(`processReturnedCommandJSON: JSON missing action`);
+            log.error(`processReturnedCommandJSON: missing action`);
             return;
         }
 
-        command = command.trim().toLowerCase();
-        if (command === 'addguardian') {
+        let json = null;
+        try {
+            json = JSON.parse(result.data); // Not using the shared simdjson here
+        } catch {
+            log.info(`processReturnedCommandJSON: no data`);
+        }
+
+        if (command === 'addGuardian') {
             this.guardianSID = json?.data?.callSid;
-            log.info(`processReturnedCommandJSON: addguardian SID: "${this.guardianSID}"`);
+            log.info(`processReturnedCommandJSON: addGuardian SID = "${this.guardianSID}"`);
+            this.transcriptHistory[track].removeCommand('cmd:addGuardian');
         } else {
             log.warn(`processReturnedCommandJSON: unknown command "${command}"`);
         }
@@ -454,7 +453,7 @@ class CallSession {
             handlePhrase(hit, track, this.callSid, this.conferenceUUID)
                 .then((result) => {
                     log.info(`[${this.actor}] handleTranscript: result:`, result);
-                    this.#processReturnedCommandJSON(result?.data);
+                    this.#processReturnedCommandJSON(result, track);
                 })
                 .catch((error) => {
                     log.error(`[${this.actor}] handleTranscript: error:`, error);
