@@ -4,11 +4,12 @@ const AhoCorasick = require('./ahocorasick');
 class TranscriptHistory {
     constructor(phrases) {
         this.finder = new AhoCorasick(phrases);
-        this.buffer = new Array(this.maxWords); // Memory for circular buffer
-
         // Determine the maximum number of words needed to look back on
         // based on the longest phrase.
         this.maxWords = Math.max(1, this.#longestPhraseInWords(phrases) - 1);
+
+        // Set up a circular buffer to avoid costly shift() calls.
+        this.buffer = new Array(this.maxWords);
         this.reset();
     }
 
@@ -87,12 +88,28 @@ class TranscriptHistory {
         return flat;
     }
 
-    // TODO: split out into pushInterim and pushFinal
+    // Testing function (unit tests)
+    flatten(numWordsBack) {
+        numWordsBack = Math.max(numWordsBack, 0);
+        numWordsBack = Math.min(numWordsBack, this.size);
 
+        return this.#constructSentence(numWordsBack);
+    }
+
+    // Testing function (unit tests)
+    getTestSentence() {
+        return this.#constructSentence(this.size);
+    }
+
+    // Interim transcripts are not added to the history. They replace the current sentence.
+    // If the last transcript was final, the current sentence is split into maxWords and added
+    // to the history.
     push(transcript, isFinal) {
         // PUBLIC METHOD
         if (!transcript) return; // Nothing to add
 
+        // Check to see if the sentence needs to be cleaned. We want to minimize the number of allocations
+        // in the common case where no cleaning is needed.
         const cleaned = this.#needsCleaning(transcript) ? this.#cleanSentence(transcript) : transcript;
         if (!cleaned) return; // Nothing to add
 
@@ -108,14 +125,14 @@ class TranscriptHistory {
 
             for (let i = start; i < length; i++) {
                 const word = words[i];
-                if (this.size < this.maxWords) {
+                if (this.size >= this.maxWords) {
+                    // Common case first. Buffer full: overwrite the oldest word and advance the start pointer.
+                    this.buffer[this.start] = word;
+                    this.start = (this.start + 1) % this.maxWords;
+                } else {
                     // Append to the end.
                     this.buffer[(this.start + this.size) % this.maxWords] = word;
                     this.size++;
-                } else {
-                    // Buffer full: overwrite the oldest word and advance the start pointer.
-                    this.buffer[this.start] = word;
-                    this.start = (this.start + 1) % this.maxWords;
                 }
             }
         }
@@ -126,42 +143,32 @@ class TranscriptHistory {
     }
 
     findScamPhrases() {
+        // PUBLIC METHOD
         // Calling findScamPhrases a second time on the same history
         // returns null to avoid multiple hits on the same data
         if (!this.dirty) return null;
 
-        this.dirty = false;
-
         const flat = this.#constructSentence(this.size);
-        return this.finder.containsAny(flat);
-    }
-
-    // Testing function (unit tests)
-    flatten(numWordsBack) {
-        numWordsBack = Math.max(numWordsBack, 0);
-        numWordsBack = Math.min(numWordsBack, this.size);
-
-        return this.#constructSentence(numWordsBack);
-    }
-
-    // Testing function (unit tests)
-    getTestSentence() {
-        return this.#constructSentence(this.size);
-    }
-
-    reset() {
-        // Set up a circular buffer to avoid costly shift() calls.
-        this.start = 0; // Points to the oldest element.
-        this.size = 0; // Number of words currently stored.
-        this.current = ''; // current sentence to scan.
-        this.dirty = false; // Anything new to check?
-        this.lastWasFinal = true; // Was the last transcript pushed to history 'final'
+        let hit = this.finder.containsAny(flat);
+        this.dirty = false;
+        return hit;
     }
 
     // Remove all phrases that end up calling this command. This is for
     // one-shot style commands
     removeCommand(command) {
+        // PUBLIC METHOD
         this.finder.removeByType(command);
+    }
+
+    reset() {
+        // PUBLIC METHOD
+        // Reset the circular buffer and other variables.
+        this.start = 0; // Points to the oldest element.
+        this.size = 0; // Number of words currently stored.
+        this.current = ''; // current sentence to scan.
+        this.dirty = false; // Anything new to check?
+        this.lastWasFinal = true; // Was the last transcript pushed to history 'final'
     }
 }
 
