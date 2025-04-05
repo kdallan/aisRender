@@ -428,7 +428,7 @@ class CallSession {
         log.info(`[${track}][${isFinal ? 'Final' : 'Interim'}][${this.actor}] ${transcript}`);
 
         const history = this.transcriptHistory[track];
-        history.push(transcript);
+        history.push(transcript, isFinal);
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
