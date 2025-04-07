@@ -413,10 +413,10 @@ class CallSession {
             log.info(`processReturnedCommandJSON: no data`);
         }
 
-        if (command === 'addGuardian') {
+        if (command === 'addGuardian') {            
             this.guardianSID = json?.data?.callSid;
             log.info(`processReturnedCommandJSON: addGuardian SID = "${this.guardianSID}"`);
-            this.transcriptHistory[track].removeCommand('cmd:addGuardian');
+            this.transcriptHistory[track].removeCommand('cmd:addParticipant');
         } else {
             log.warn(`processReturnedCommandJSON: unknown command "${command}"`);
         }
