@@ -101,8 +101,8 @@ class TranscriptHistory {
         return this.#constructSentence(this.size);
     }
 
-    // Interim transcripts are not added to the history. They replace the current sentence.
-    // If the last transcript was final, the current sentence is split into maxWords and added
+    // Interim transcripts are not added to the history. They just replace the current sentence.
+    // If the previous transcript was final, the current sentence is split into maxWords and added
     // to the history.
     push(transcript, isFinal) {
         // PUBLIC METHOD

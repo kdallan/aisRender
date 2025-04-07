@@ -353,11 +353,6 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
             const cmd = cmdstr.slice(4);
 
             switch (cmd) {
-                case 'hangup': {
-                    const signOff = phrase.signOff || 'Scam detected. Goodbye';
-                    return await sayPhraseAndHangup(callSid, signOff);
-                }
-
                 case 'addParticipant': {
                     const guardianPhone = getGuardianPhoneNumber();
                     return await addGuardian(guardianPhone, conferenceName);
@@ -376,16 +371,14 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
                 }
 
                 default: {
-                    log.warn(`${verb}: Unrecognized command: ${cmd}`);
-                    // For unrecognized commands, use the default hangup behavior but log it as a warning
-                    return await sayPhraseAndHangup(callSid, 'Scam detected. Goodbye');
+                    break;
                 }
             }
         }
 
         // If we get here, it wasn't a command
         log.info(`${verb}: Not a command: ${JSON.stringify(phrase)}`);
-        return await sayPhraseAndHangup(callSid, 'Scam detected. Goodbye');
+        return await sayPhraseAndHangup(callSid, 'Unrecognized Command. Hanging up');
     } catch (error) {
         log.error(`${verb} error:`, error);
         return {
