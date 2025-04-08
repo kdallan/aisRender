@@ -97,7 +97,7 @@ async function set(key, field, value) {
     if (!redis || redis.status !== 'ready') throw new Error('Redis client not ready.');
 
     if (!key || !field || value === undefined || value === null) {
-        const err = `Invalid input for hset: key=${key}, field=${field}`;
+        const err = `Invalid input for set: key=${key}, field=${field}`;
         log.error(err);
         return Promise.reject(new Error(err));
     }
@@ -113,7 +113,7 @@ async function set(key, field, value) {
 async function get(key, field) {
     if (!redis || redis.status !== 'ready') throw new Error('Redis client not ready.');
 
-    if (!key || !field ) {
+    if (!key || !field) {
         const err = `Missing hget: key=${key}, field=${field}`;
         log.error(err);
         return Promise.reject(new Error(err));

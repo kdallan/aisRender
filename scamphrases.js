@@ -76,7 +76,7 @@ const commonCommands = [
 
 const scamPhrasesOPY = commonPhrases;
 
-const scamPhrasesSUB = [{ phrase: 'add guardian', type: 'cmd:addParticipant' }, ...commonCommands, ...commonPhrases];
+const scamPhrasesSUB = [{ phrase: 'add guardian', type: 'cmd:addGuardian' }, ...commonCommands, ...commonPhrases];
 
 const scamPhrasesGDN = [
     { phrase: 'end call', type: 'cmd:hangupOPY' },
