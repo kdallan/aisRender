@@ -22,10 +22,12 @@ const API_CONFIG = {
 
 // Guardian commands
 const GUARDIAN_COMMANDS = {
-    TALK_TO_SID: 'talkToSID',
+    TALK_TO_OPY: 'talkToOPY',
+    TALK_TO_SUB: 'talkToSUB',
     TALK_TO_ALL: 'talkToAll',
-    HANGUP_ALL: 'hangupAll',
     HANGUP_OPY: 'hangupOPY',
+    HANGUP_SUB: 'hangupSUB',
+    HANGUP_ALL: 'hangupAll',
     DROP_OFF_CALL: 'dropOffCall',
     MONITOR_CALL: 'monitorCall',
 };
@@ -254,13 +256,22 @@ async function hangupSID(callSid, conferenceName) {
     }
 }
 
-async function hangupActor(actor, conferenceName) {
-    const opySid = await sidDatabase.get(conferenceName, actor);
-    if( opySid) {
-        return hangupSID(opySid, conferenceName);
+async function talkToActor(actor, conferenceName) {
+    const actorSid = await sidDatabase.get(conferenceName, actor);
+    if (actorSid) {
+        return talkToSID(actorSid, conferenceName);
     }
 
-    log.error(`Failed to hangup OPY. No OPY SID found for conference: ${conferenceName}`);
+    log.error(`Failed to talk to actor. No ${actor} SID found for conference: ${conferenceName}`);
+}
+
+async function hangupActor(actor, conferenceName) {
+    const actorSid = await sidDatabase.get(conferenceName, actor);
+    if (actorSid) {
+        return hangupSID(actorSid, conferenceName);
+    }
+
+    log.error(`Failed to hangup actor. No ${actor} SID found for conference: ${conferenceName}`);
 }
 
 /**
@@ -333,7 +344,7 @@ function getOrCreateTwilioClient() {
 async function sayPhraseAndHangup(callSid, phrase) {
     const verb = 'hangup';
     if (!callSid) {
-        const msg = 'Call SID is required'
+        const msg = 'Call SID is required';
         log.error(`${verb}: ${msg}`);
         return { success: false, action: verb, message: msg };
     }
@@ -407,17 +418,25 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
             const cmd = cmdstr.slice(4);
 
             switch (cmd) {
-                case 'addParticipant': {
+                case 'addGuardian': {
                     const guardianPhone = getGuardianPhoneNumber();
                     return await addGuardian(guardianPhone, conferenceName);
                 }
 
-                case GUARDIAN_COMMANDS.TALK_TO_SID: {
-                    return await talkToSID(callSid, conferenceName);
+                case GUARDIAN_COMMANDS.TALK_TO_SUB: {
+                    return await talkToActor('SUB', conferenceName);
+                }
+
+                case GUARDIAN_COMMANDS.TALK_TO_OPY: {
+                    return await talkToActor('OPY', conferenceName);
+                }
+
+                case GUARDIAN_COMMANDS.HANGUP_SUB: {
+                    return await hangupActor('SUB', conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.HANGUP_OPY: {
-                    return await hangupActor("OPY", conferenceName);
+                    return await hangupActor('OPY', conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.TALK_TO_ALL:
@@ -429,14 +448,20 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
                 }
 
                 default: {
-                    break;
+                    const msg = `${verb}: Unknown command: ${cmd}`;
+                    log.error(msg);
+                    return {
+                        success: false,
+                        action: verb,
+                        message: msg,
+                    };
                 }
             }
         }
 
-        // If we get here, it wasn't a command
+        // If we get here, it wasn't a command, must have been a scam phrase
         log.info(`${verb}: Not a command: ${JSON.stringify(phrase)}`);
-        return await sayPhraseAndHangup(callSid, 'Unrecognized Command. Hanging up');
+        return await sayPhraseAndHangup(callSid, 'Scam detected. Hanging up');
     } catch (error) {
         log.error(`${verb} error:`, error);
         return {
