@@ -20,7 +20,10 @@ const API_CONFIG = {
     timeout: 10000, // 10 seconds timeout
 };
 
-// Guardian commands
+const SUB_COMMANDS = {
+    ADD_GUARDIAN: 'addGuardian',
+};
+
 const GUARDIAN_COMMANDS = {
     TALK_TO_OPY: 'talkToOPY',
     TALK_TO_SUB: 'talkToSUB',
@@ -418,7 +421,7 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
             const cmd = cmdstr.slice(4);
 
             switch (cmd) {
-                case 'addGuardian': {
+                case SUB_COMMANDS.ADD_GUARDIAN: {
                     const guardianPhone = getGuardianPhoneNumber();
                     return await addGuardian(guardianPhone, conferenceName);
                 }
