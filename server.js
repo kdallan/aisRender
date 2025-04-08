@@ -13,6 +13,7 @@ const pino = require('pino');
 const log = pino({ base: null });
 const { PORT, WANT_MONITORING } = require('./config');
 const { TextDecoder } = require('util');
+const sidDatabase = require('./database');
 
 require('dotenv').config();
 
@@ -377,10 +378,12 @@ class CallSession {
                     this.callSid = getValueOrDefault(data, 'start.callSid', null); // Optional
                     log.info(`Twilio: Call started, SID: ${this.callSid}`);
                     this.conferenceUUID = getValueOrDefault(data, 'start.customParameters.conferenceUUID', ''); // Optional
-                    log.info(`\tConference name: ${this.conferenceUUID}`);
+                    log.info(`  Conference name: ${this.conferenceUUID}`);
                     this.actor = getValueOrDefault(data, 'start.customParameters.actor', ''); // Optional: 'SUB', 'OPY', 'GDN'
-                    log.info(`\tActor: ${this.actor}`);
+                    log.info(`  Actor: ${this.actor}`);
                     this.guardianSID = ''; // Get this from 'addGuardian' event. If actor is 'GDN', callSID is the guardianSID
+
+                    sidDatabase.set(this.conferenceUUID, this.actor, this.callSid);
                     break;
 
                 case 'close':
@@ -632,6 +635,19 @@ process.on('uncaughtException', (error) => {
     if (server) server.stop();
     process.exit(1);
 });
+
+// Ensure database connection is established before starting the server
+// --- Asynchronous Setup using IIAFE ---
+(async () => {
+    try {
+        log.info("Attempting initial sidDatabase at module level...");
+        await sidDatabase.connect();
+        log.info("sidDatabase connected and ready (module level setup).");
+    } catch (error) {
+        log.error("FATAL: Failed to connect to sidDatabase:", error);
+        process.exit(1);
+    }
+})(); // Note the () at the end to immediately invoke the function
 
 // Start the server
 const server = new VoiceServer();

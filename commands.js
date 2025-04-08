@@ -4,6 +4,7 @@ const pino = require('pino');
 const twilio = require('twilio');
 const log = pino({ base: null });
 const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = require('./config');
+const sidDatabase = require('./database');
 
 // Constants
 const POST_FIELDS = {
@@ -24,6 +25,7 @@ const GUARDIAN_COMMANDS = {
     TALK_TO_SID: 'talkToSID',
     TALK_TO_ALL: 'talkToAll',
     HANGUP_ALL: 'hangupAll',
+    HANGUP_OPY: 'hangupOPY',
     DROP_OFF_CALL: 'dropOffCall',
     MONITOR_CALL: 'monitorCall',
 };
@@ -209,6 +211,58 @@ async function talkToSID(callSid, conferenceName) {
     }
 }
 
+async function hangupSID(callSid, conferenceName) {
+    const verb = GUARDIAN_COMMANDS.HANGUP_SID;
+
+    // Validate inputs
+    if (!callSid || !conferenceName) {
+        const msg = `Call SID and conference name are required`;
+        log.error(`${verb}: ${msg}`);
+        return { success: false, action: verb, message: msg };
+    }
+
+    if (!isValidCallSid(callSid)) {
+        const msg = `Invalid call SID format: ${callSid}`;
+        log.error(`${verb}: ${msg}`);
+        return { success: false, action: verb, message: msg };
+    }
+
+    log.info(`${verb} ${callSid} "${conferenceName}"`);
+
+    const postData = `${POST_FIELDS.CALL_SID}=${encodeURIComponent(callSid)}&${
+        POST_FIELDS.CONFERENCE_ID
+    }=${encodeURIComponent(conferenceName)}`;
+
+    log.info(`POST data: ${postData}`);
+
+    try {
+        const options = createPOSTOptions('guardian/hangup', postData);
+        const response = await sendPOSTrequest(options, postData);
+        return {
+            success: true,
+            action: verb,
+            message: `${callSid} "${conferenceName}"`,
+            data: response,
+        };
+    } catch (error) {
+        log.error(`Failed to ${verb}. callSID: ${callSid} conferenceName: ${conferenceName}`, error);
+        return {
+            success: false,
+            action: verb,
+            message: `${callSid} "${conferenceName}" ${error.message}`,
+        };
+    }
+}
+
+async function hangupActor(actor, conferenceName) {
+    const opySid = await sidDatabase.get(conferenceName, actor);
+    if( opySid) {
+        return hangupSID(opySid, conferenceName);
+    }
+
+    log.error(`Failed to hangup OPY. No OPY SID found for conference: ${conferenceName}`);
+}
+
 /**
  * Executes a guardian command on a conference
  * @param {string} verb - The command verb (for logging)
@@ -360,6 +414,10 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
 
                 case GUARDIAN_COMMANDS.TALK_TO_SID: {
                     return await talkToSID(callSid, conferenceName);
+                }
+
+                case GUARDIAN_COMMANDS.HANGUP_OPY: {
+                    return await hangupActor("OPY", conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.TALK_TO_ALL:
