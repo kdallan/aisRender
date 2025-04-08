@@ -344,8 +344,8 @@ function getOrCreateTwilioClient() {
  * @param {string} phrase - Phrase to say before hangup
  * @returns {Promise<Object>} Result of the operation
  */
-async function sayPhraseAndHangup(callSid, phrase) {
-    const verb = 'hangup';
+async function sayPhrase(callSid, phrase, hangup) {
+    const verb = 'sayPhrase';
     if (!callSid) {
         const msg = 'Call SID is required';
         log.error(`${verb}: ${msg}`);
@@ -362,10 +362,12 @@ async function sayPhraseAndHangup(callSid, phrase) {
     const VoiceResponse = twilio.twiml.VoiceResponse;
 
     try {
-        log.info(`${verb}: saying phrase and hanging up call ${callSid}: "${phrase}"`);
+        log.info(`${verb}: saying phrase ${callSid}: "${phrase}" hangup: ${hangup}`);
         const twiml = new VoiceResponse();
         twiml.say({ voice: 'Polly.Amy-Neural', language: 'en-US' }, phrase);
-        twiml.leave();
+        if (hangup) {
+            twiml.leave();
+        }
 
         const result = await client.calls(callSid).update({ twiml: twiml.toString() });
         log.info(`${verb}: call ${callSid} successfully updated with TwiML`);
@@ -464,7 +466,7 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
 
         // If we get here, it wasn't a command, must have been a scam phrase
         log.info(`${verb}: Not a command: ${JSON.stringify(phrase)}`);
-        return await sayPhraseAndHangup(callSid, 'Scam detected. Hanging up');
+        return await sayPhrase(callSid, 'Scam detected. Hanging up', true);
     } catch (error) {
         log.error(`${verb} error:`, error);
         return {
@@ -477,4 +479,5 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
 
 module.exports = {
     handlePhrase,
+    sayPhrase,
 };

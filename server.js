@@ -416,7 +416,7 @@ class CallSession {
             log.info(`processReturnedCommandJSON: no data`);
         }
 
-        if (command === 'addGuardian') {            
+        if (command === 'addGuardian') {
             this.guardianSID = json?.data?.callSid;
             log.info(`processReturnedCommandJSON: addGuardian SID = "${this.guardianSID}"`);
             this.transcriptHistory[track].removeCommand('cmd:addGuardian');
@@ -640,11 +640,11 @@ process.on('uncaughtException', (error) => {
 // --- Asynchronous Setup using IIAFE ---
 (async () => {
     try {
-        log.info("Attempting initial sidDatabase at module level...");
+        log.info('Attempting initial sidDatabase at module level...');
         await sidDatabase.connect();
-        log.info("sidDatabase connected and ready (module level setup).");
+        log.info('sidDatabase connected and ready (module level setup).');
     } catch (error) {
-        log.error("FATAL: Failed to connect to sidDatabase:", error);
+        log.error('FATAL: Failed to connect to sidDatabase:', error);
         process.exit(1);
     }
 })(); // Note the () at the end to immediately invoke the function
