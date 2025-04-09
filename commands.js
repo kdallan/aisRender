@@ -153,6 +153,7 @@ async function addGuardian(phoneNumber, conferenceName) {
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
+            remove: true,
             action: verb,
             message: `${phoneNumber} "${conferenceName}"`,
             data: response,

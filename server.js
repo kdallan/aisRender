@@ -412,16 +412,17 @@ class CallSession {
         let json = null;
         try {
             json = JSON.parse(result.data); // Not using the shared simdjson here
+            if (json) {
+                log.info(`processReturnedCommandJSON: json:`, json);
+            }        
         } catch {
             log.info(`processReturnedCommandJSON: no data`);
         }
 
-        if (command === 'addGuardian') {
-            this.guardianSID = json?.data?.callSid;
-            log.info(`processReturnedCommandJSON: addGuardian SID = "${this.guardianSID}"`);
-            this.transcriptHistory[track].removeCommand('cmd:addGuardian');
-        } else {
-            log.warn(`processReturnedCommandJSON: unknown command "${command}"`);
+        if ( result.remove ) {
+            const cmd = 'cmd:' + command;
+            log.info(`Removing ${cmd}`);
+            this.transcriptHistory[track].removeCommand( cmd );
         }
     }
 
