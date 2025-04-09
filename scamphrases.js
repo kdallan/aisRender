@@ -84,7 +84,13 @@ const scamPhrasesSUB = [
     ...commonPhrases,
 ];
 
-const scamPhrasesGDN = [{ phrase: 'end call', type: 'cmd:hangupOPY' }, ...commonCommands];
+const scamPhrasesGDN = [
+    { phrase: 'end call', type: 'cmd:hangupOPY' },
+    { phrase: 'hold sub', type: 'cmd:holdSUB' },
+    { phrase: 'hold subscriber', type: 'cmd:holdSUB' },
+    { phrase: 'hold other party', type: 'cmd:holdOPY' },
+    ...commonCommands,
+];
 
 module.exports = {
     scamPhrasesOPY,

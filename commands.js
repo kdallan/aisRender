@@ -25,6 +25,8 @@ const SUB_COMMANDS = {
 };
 
 const GUARDIAN_COMMANDS = {
+    HOLD_OPY: 'holdOPY',
+    HOLD_SUB: 'holdSUB',
     TALK_TO_OPY: 'talkToOPY',
     TALK_TO_SUB: 'talkToSUB',
     TALK_TO_ALL: 'talkToAll',
@@ -260,6 +262,49 @@ async function hangupSID(callSid, conferenceName) {
     }
 }
 
+async function holdSID(callSid, conferenceName) {
+    const verb = 'holdSID';
+
+    // Validate inputs
+    if (!callSid || !conferenceName) {
+        const msg = `Call SID and conference name are required`;
+        log.error(`${verb}: ${msg}`);
+        return { success: false, action: verb, message: msg };
+    }
+
+    if (!isValidCallSid(callSid)) {
+        const msg = `Invalid call SID format: ${callSid}`;
+        log.error(`${verb}: ${msg}`);
+        return { success: false, action: verb, message: msg };
+    }
+
+    log.info(`${verb} ${callSid} "${conferenceName}"`);
+
+    const postData = `${POST_FIELDS.CALL_SID}=${encodeURIComponent(callSid)}&${
+        POST_FIELDS.CONFERENCE_ID
+    }=${encodeURIComponent(conferenceName)}`;
+
+    log.info(`POST data: ${postData}`);
+
+    try {
+        const options = createPOSTOptions('guardian/holdSID', postData);
+        const response = await sendPOSTrequest(options, postData);
+        return {
+            success: true,
+            action: verb,
+            message: `${callSid} "${conferenceName}"`,
+            data: response,
+        };
+    } catch (error) {
+        log.error(`Failed to ${verb}. callSID: ${callSid} conferenceName: ${conferenceName}`, error);
+        return {
+            success: false,
+            action: verb,
+            message: `${callSid} "${conferenceName}" ${error.message}`,
+        };
+    }
+}
+
 async function talkToActor(actor, conferenceName) {
     const actorSid = await sidDatabase.get(conferenceName, actor);
     if (actorSid) {
@@ -276,6 +321,15 @@ async function hangupActor(actor, conferenceName) {
     }
 
     log.error(`Failed to hangup actor. No ${actor} SID found for conference: ${conferenceName}`);
+}
+
+async function holdActor(actor, conferenceName) {
+    const actorSid = await sidDatabase.get(conferenceName, actor);
+    if (actorSid) {
+        return holdSID(actorSid, conferenceName);
+    }
+
+    log.error(`Failed to hold actor. No ${actor} SID found for conference: ${conferenceName}`);
 }
 
 /**
@@ -427,6 +481,14 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
                 case SUB_COMMANDS.ADD_GUARDIAN: {
                     const guardianPhone = getGuardianPhoneNumber();
                     return await addGuardian(guardianPhone, conferenceName);
+                }
+
+                case GUARDIAN_COMMANDS.HOLD_SUB: {
+                    return await holdActor('SUB', conferenceName);
+                }
+
+                case GUARDIAN_COMMANDS.HOLD_OPY: {
+                    return await holdActor('OPY', conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.TALK_TO_SUB: {
