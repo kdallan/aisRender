@@ -174,7 +174,7 @@ async function addGuardian(phoneNumber, conferenceName) {
  * @returns {Promise<Object>} Result of the operation
  */
 async function talkToSID(callSid, conferenceName) {
-    const verb = GUARDIAN_COMMANDS.TALK_TO_SID;
+    const verb = 'talkToSID';
 
     // Validate inputs
     if (!callSid || !conferenceName) {
@@ -241,7 +241,7 @@ async function hangupSID(callSid, conferenceName) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions('guardian/hangup', postData);
+        const options = createPOSTOptions('guardian/hangupSID', postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
