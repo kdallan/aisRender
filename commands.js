@@ -217,7 +217,7 @@ async function talkToSID(callSid, conferenceName) {
 }
 
 async function hangupSID(callSid, conferenceName) {
-    const verb = GUARDIAN_COMMANDS.HANGUP_SID;
+    const verb = 'hangupSID';
 
     // Validate inputs
     if (!callSid || !conferenceName) {

@@ -68,8 +68,9 @@ const commonPhrases = [
 ];
 
 const commonCommands = [
-    { phrase: 'talk to sid', type: 'cmd:talkToSID' },
     { phrase: 'talk to all', type: 'cmd:talkToAll' },
+    { phrase: 'talk to subscriber', type: 'cmd:talkToSUB' },
+    { phrase: 'talk to other party', type: 'cmd:talkToOPY' },
     { phrase: 'drop off call', type: 'cmd:dropOffCall' },
     { phrase: 'monitor call', type: 'cmd:monitorCall' },
 ];
