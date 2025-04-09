@@ -444,7 +444,7 @@ class CallSession {
 
             this.processingCommand = true;
             let now = performance.now();
-            if (this.lastCommandTime && now - this.lastCommandTime < 10000) {
+            if (this.lastCommandTime && now - this.lastCommandTime < 4000) {
                 log.info(`[${this.actor}] Ignoring scam phrase hit due to cooldown: ${hit}`);
                 this.processingCommand = false;
                 return;
