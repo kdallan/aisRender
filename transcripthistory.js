@@ -88,7 +88,7 @@ class TranscriptHistory {
         return flat;
     }
 
-    // Testing function (unit tests)
+    // Testing function (unit tests) and for First-Last name challenge
     flatten(numWordsBack) {
         numWordsBack = Math.max(numWordsBack, 0);
         numWordsBack = Math.min(numWordsBack, this.size);

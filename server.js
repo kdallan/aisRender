@@ -1,7 +1,7 @@
 'use strict';
 const uWS = require('uWebSockets.js');
 const TranscriptHistory = require('./transcripthistory');
-const { handlePhrase, playAudio } = require('./commands');
+const { handlePhrase, playAudio, callConnect } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
 const simdjson = require('simdjson'); // Fast/lazy parsing
@@ -21,6 +21,19 @@ const TRACK_INBOUND = 'inbound';
 const TRACK_OUTBOUND = 'outbound';
 const INITIAL_THROTTLE_INTERVAL = 20;
 
+const ChallengeStatus = Object.freeze({
+    NONE: 0,
+    PLAYINGAUDIO: 1,
+    TIMEDRESPONSE: 2,
+    FAILED: 3,
+});
+
+function inInitialChallengeStatus(status) {
+    return status === ChallengeStatus.PLAYINGAUDIO || status === ChallengeStatus.TIMEDRESPONSE;
+}
+
+const CHALLENGE_TIMEOUT = 5 * 1000; // 5 seconds
+
 // Helper function for simdjson lazyParse
 function getValueOrDefault(parsedDoc, path, defaultValue) {
     try {
@@ -28,6 +41,16 @@ function getValueOrDefault(parsedDoc, path, defaultValue) {
     } catch {
         return defaultValue;
     }
+}
+
+function containsChallengeName(sentence) {
+    log.info(`containsChallengeName: ${sentence}`);
+
+    const target = 'kevin'; // TODO - use 'Account' database target names
+    const words =
+        sentence.toLowerCase().match(/\b\w+\b/g) || // grab all “words” (alphanumeric sequences)
+        [];
+    return words.includes(target.toLowerCase());
 }
 
 class CallSession {
@@ -145,6 +168,13 @@ class CallSession {
 
         // Reset rate tracking (but keep totals)
         this.metrics.deepgram.sendRates = { inbound: [], outbound: [] };
+    }
+
+    #stopChallengeTimer() {
+        if (this.challengeTimer) {
+            clearTimeout(this.challengeTimer);
+            this.challengeTimer = null;
+        }
     }
 
     #stopMemoryMonitor() {
@@ -337,6 +367,7 @@ class CallSession {
         this.#startFlushTimer(track);
     }
 
+    // eslint-disable-next-line no-unused-vars
     handleMessage(message, isBinary) {
         // PUBLIC METHOD
         if (!this.active) return;
@@ -382,12 +413,27 @@ class CallSession {
                     this.actor = getValueOrDefault(data, 'start.customParameters.actor', ''); // Optional: 'SUB', 'OPY', 'GDN'
                     log.info(`  Actor: ${this.actor}`);
                     this.guardianSID = ''; // Get this from 'addGuardian' event. If actor is 'GDN', callSID is the guardianSID
+                    this.challengeStatus = ChallengeStatus.NONE;
+                    this.challengeTimer = null;
 
                     sidDatabase.set(this.conferenceUUID, this.actor, this.callSid);
 
-                    // TODO: Quick placeholder to test playing audio
+                    // Fire off the challenge audio
                     if ('OPY' == this.actor) {
-                        playAudio(this.conferenceUUID, 'sayChallengeCaller');
+                        this.challengeStatus = ChallengeStatus.PLAYINGAUDIO;
+                        playAudio(this.conferenceUUID, 'sayChallengeCaller')
+                            .then((result) => {
+                                log.info(`[${this.actor}] playAudio result:`, result);
+                            })
+                            .catch((error) => {
+                                log.error(`[${this.actor}] handleTranscript: error:`, error);
+                            })
+                            .finally(() => {
+                                this.challengeStatus = ChallengeStatus.TIMEDRESPONSE;
+                                this.challengeTimer = setTimeout(() => {
+                                    this.#challengeTimedOut();
+                                }, CHALLENGE_TIMEOUT);
+                            });
                     }
 
                     break;
@@ -400,6 +446,13 @@ class CallSession {
         } catch (error) {
             log.error('Error processing message', error);
         }
+    }
+
+    #challengeTimedOut() {
+        log.info(`[${this.actor}] Challenge timed out`);
+        this.challengeStatus = ChallengeStatus.FAILED;
+
+        // TODO: Play challenge failed audio?
     }
 
     #processReturnedCommandJSON(result, track) {
@@ -432,6 +485,21 @@ class CallSession {
         }
     }
 
+    #handleChallengeResponse(track) {
+        log.info(`[${this.actor}] Challenge response received`);
+        const history = this.transcriptHistory[track];
+        const words = history.flatten(2);
+
+        if (containsChallengeName(words)) {
+            log.info(`[${this.actor}] Challenge passed`);
+            this.#stopChallengeTimer();
+            this.challengeStatus = ChallengeStatus.NONE;
+
+            const number = '+12063498679'; // TODO - use 'Account' database number
+            callConnect(this.conferenceUUID, number);
+        }
+    }
+
     #handleTranscript(transcript, isFinal, track) {
         if (!this.active || !this.transcriptHistory[track]) return;
 
@@ -439,6 +507,11 @@ class CallSession {
 
         const history = this.transcriptHistory[track];
         history.push(transcript, isFinal);
+
+        if (inInitialChallengeStatus(this.challengeStatus)) {
+            this.#handleChallengeResponse(track);
+            return;
+        }
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
@@ -483,6 +556,7 @@ class CallSession {
         this.#stopStatsTimer();
         this.#stopFlushTimer(TRACK_INBOUND);
         this.#stopFlushTimer(TRACK_OUTBOUND);
+        this.#stopChallengeTimer();
     }
 
     cleanup() {
@@ -553,6 +627,8 @@ class VoiceServer {
                 maxBackpressure: 1 * 1024 * 1024,
 
                 /* Handlers */
+
+                // eslint-disable-next-line no-unused-vars
                 open: (ws, req) => {
                     const sessionId = randomUUID();
 
@@ -574,6 +650,7 @@ class VoiceServer {
                 drain: (ws) => {
                     log.warn(`WebSocket backpressure: ${ws.sessionId}, bufferedAmount: ${ws.getBufferedAmount()}`);
                 },
+                // eslint-disable-next-line no-unused-vars
                 close: (ws, code, message) => {
                     const session = this.sessions.get(ws.sessionId);
                     if (session) {

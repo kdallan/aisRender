@@ -340,6 +340,43 @@ async function playAudio(conferenceName, fileName) {
     }
 }
 
+async function callConnect(conferenceName, telephoneNumber) {
+    const verb = 'callConnect';
+
+    // Validate inputs
+    if (!conferenceName || !telephoneNumber) {
+        const msg = `ConferenceName and telephoneNumber are required`;
+        log.error(`${verb}: ${msg}`);
+        return { success: false, action: verb, message: msg };
+    }
+
+    log.info(`${verb} "${conferenceName}" "${telephoneNumber}"`);
+
+    const postData = `${POST_FIELDS.CONFERENCE_ID}=${encodeURIComponent(
+        conferenceName
+    )}&telephoneNumber=${telephoneNumber}`;
+
+    log.info(`POST data: ${postData}`);
+
+    try {
+        const options = createPOSTOptions(verb, postData);
+        const response = await sendPOSTrequest(options, postData);
+        return {
+            success: true,
+            action: verb,
+            message: `"${conferenceName}" "${telephoneNumber}"`,
+            data: response,
+        };
+    } catch (error) {
+        log.error(`Failed to ${verb}.conferenceName: ${conferenceName} filaName: ${telephoneNumber}`, error);
+        return {
+            success: false,
+            action: verb,
+            message: `"${conferenceName}" "${telephoneNumber}" ${error.message}`,
+        };
+    }
+}
+
 async function talkToActor(actor, conferenceName) {
     const actorSid = await sidDatabase.get(conferenceName, actor);
     if (actorSid) {
@@ -579,4 +616,5 @@ module.exports = {
     handlePhrase,
     sayPhrase,
     playAudio,
+    callConnect,
 };
