@@ -78,7 +78,10 @@ const commonCommands = [
 const scamPhrasesOPY = commonPhrases;
 
 const scamPhrasesSUB = [
+    { phrase: 'call guardian', type: 'cmd:addGuardian' },
+    { phrase: 'call the guardian', type: 'cmd:addGuardian' },
     { phrase: 'add guardian', type: 'cmd:addGuardian' },
+    { phrase: 'add the guardian', type: 'cmd:addGuardian' },
     { phrase: 'adguardian', type: 'cmd:addGuardian' },
     ...commonCommands,
     ...commonPhrases,
