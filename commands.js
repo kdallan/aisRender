@@ -305,6 +305,41 @@ async function holdSID(callSid, conferenceName) {
     }
 }
 
+async function playAudio(conferenceName, fileName) {
+    const verb = 'play';
+
+    // Validate inputs
+    if (!conferenceName || !fileName) {
+        const msg = `ConferenceName and fileName are required`;
+        log.error(`${verb}: ${msg}`);
+        return { success: false, action: verb, message: msg };
+    }
+
+    log.info(`${verb} "${conferenceName}" "${fileName}"`);
+
+    const postData = `${POST_FIELDS.CONFERENCE_ID}=${encodeURIComponent(conferenceName)}&audioFileName=${fileName}`;
+
+    log.info(`POST data: ${postData}`);
+
+    try {
+        const options = createPOSTOptions('play', postData);
+        const response = await sendPOSTrequest(options, postData);
+        return {
+            success: true,
+            action: verb,
+            message: `"${conferenceName}" "${fileName}"`,
+            data: response,
+        };
+    } catch (error) {
+        log.error(`Failed to ${verb}.conferenceName: ${conferenceName} filaName: ${fileName}`, error);
+        return {
+            success: false,
+            action: verb,
+            message: `"${conferenceName}" "${fileName}" ${error.message}`,
+        };
+    }
+}
+
 async function talkToActor(actor, conferenceName) {
     const actorSid = await sidDatabase.get(conferenceName, actor);
     if (actorSid) {
@@ -543,4 +578,5 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
 module.exports = {
     handlePhrase,
     sayPhrase,
+    playAudio,
 };

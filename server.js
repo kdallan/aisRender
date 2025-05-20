@@ -1,7 +1,7 @@
 'use strict';
 const uWS = require('uWebSockets.js');
 const TranscriptHistory = require('./transcripthistory');
-const { handlePhrase } = require('./commands');
+const { handlePhrase, playAudio } = require('./commands');
 const DeepgramSTTService = require('./deepgramstt');
 const { performance } = require('perf_hooks');
 const simdjson = require('simdjson'); // Fast/lazy parsing
@@ -384,6 +384,12 @@ class CallSession {
                     this.guardianSID = ''; // Get this from 'addGuardian' event. If actor is 'GDN', callSID is the guardianSID
 
                     sidDatabase.set(this.conferenceUUID, this.actor, this.callSid);
+
+                    // TODO: Quick placeholder to test playing audio
+                    if ('OPY' == this.actor) {
+                        playAudio(this.conferenceUUID, 'sayChallengeCaller');
+                    }
+
                     break;
 
                 case 'close':
@@ -414,15 +420,15 @@ class CallSession {
             json = JSON.parse(result.data); // Not using the shared simdjson here
             if (json) {
                 log.info(`processReturnedCommandJSON: json:`, json);
-            }        
+            }
         } catch {
             log.info(`processReturnedCommandJSON: no data`);
         }
 
-        if ( result.remove ) {
+        if (result.remove) {
             const cmd = 'cmd:' + command;
             log.info(`Removing ${cmd}`);
-            this.transcriptHistory[track].removeCommand( cmd );
+            this.transcriptHistory[track].removeCommand(cmd);
         }
     }
 
