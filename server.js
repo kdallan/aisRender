@@ -44,29 +44,46 @@ function getValueOrDefault(parsedDoc, path, defaultValue) {
     }
 }
 
-function containsChallengeName(target, sentence) {
-    log.info(`containsChallengeName: ${target} in ${sentence}`);
+/**
+ * Check whether a given name appears in a sentence.
+ * Supports matching "First" or "First Last", case-insensitive.
+ *
+ * @param {string} sentence – the text to search
+ * @param {string} firstName – the first name to find
+ * @param {string} [lastName] – optional last name for full-name match
+ * @returns {boolean}
+ */
+function findNameInSentence(sentence, firstName, lastName) {
+    // Validate inputs
+    if (typeof sentence !== 'string' || !sentence.trim()) return false;
+    if (typeof firstName !== 'string' || !firstName.trim()) return false;
+    if (lastName != null && (typeof lastName !== 'string' || !lastName.trim())) return false;
 
-    if (!target || !sentence) {
+    // Pre-trimmed values
+    const fn = firstName.trim();
+    const ln = lastName?.trim();
+
+    // Escape helper lifted outside if reused elsewhere
+    const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Build pattern: use Unicode-aware word boundaries (\p{L}) if your engine supports it
+    const namePattern = ln
+        ? `(?<!\\p{L})${escapeRegExp(fn)}[ ]+${escapeRegExp(ln)}(?!\\p{L})`
+        : `(?<!\\p{L})${escapeRegExp(fn)}(?!\\p{L})`;
+
+    let regex;
+    try {
+        // Add 'u' flag for Unicode if available in your target environment
+        regex = new RegExp(namePattern, 'iu');
+    } catch {
         return false;
     }
 
-    target = target.trim().toLowerCase();
-    sentence = sentence.trim();
-
-    if (0 == target.length || 0 == sentence.length) {
-        return false;
-    }
-
-    // TODO - allow first + last names
-    const words =
-        sentence.toLowerCase().match(/\b\w+\b/g) || // grab all “words” (alphanumeric sequences)
-        [];
-    return words.includes(target.toLowerCase());
+    return regex.test(sentence);
 }
 
 function passedChallenge(sentence) {
-    return containsChallengeName('kevin', sentence);
+    return findNameInSentence(sentence, 'kevin');
 }
 
 class CallSession {
