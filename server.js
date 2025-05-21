@@ -32,7 +32,8 @@ function inInitialChallengeStatus(status) {
     return status === ChallengeStatus.PLAYINGAUDIO || status === ChallengeStatus.TIMEDRESPONSE;
 }
 
-const CHALLENGE_TIMEOUT = 5 * 1000; // 5 seconds
+const CHALLENGE_AUDIO_LENGTH = 14 * 1000;
+const CHALLENGE_TIMEOUT = CHALLENGE_AUDIO_LENGTH + 5 * 1000;
 
 // Helper function for simdjson lazyParse
 function getValueOrDefault(parsedDoc, path, defaultValue) {
@@ -43,14 +44,29 @@ function getValueOrDefault(parsedDoc, path, defaultValue) {
     }
 }
 
-function containsChallengeName(sentence) {
-    log.info(`containsChallengeName: ${sentence}`);
+function containsChallengeName(target, sentence) {
+    log.info(`containsChallengeName: ${target} in ${sentence}`);
 
-    const target = 'kevin'; // TODO - use 'Account' database target names
+    if (!target || !sentence) {
+        return false;
+    }
+
+    target = target.trim().toLowerCase();
+    sentence = sentence.trim();
+
+    if (0 == target.length || 0 == sentence.length) {
+        return false;
+    }
+
+    // TODO - allow first + last names
     const words =
         sentence.toLowerCase().match(/\b\w+\b/g) || // grab all “words” (alphanumeric sequences)
         [];
     return words.includes(target.toLowerCase());
+}
+
+function passedChallenge(sentence) {
+    return containsChallengeName('kevin', sentence);
 }
 
 class CallSession {
@@ -490,7 +506,7 @@ class CallSession {
         const history = this.transcriptHistory[track];
         const words = history.flatten(2);
 
-        if (containsChallengeName(words)) {
+        if (passedChallenge(words)) {
             log.info(`[${this.actor}] Challenge passed`);
             this.#stopChallengeTimer();
             this.challengeStatus = ChallengeStatus.NONE;
@@ -508,10 +524,10 @@ class CallSession {
         const history = this.transcriptHistory[track];
         history.push(transcript, isFinal);
 
-        // if (inInitialChallengeStatus(this.challengeStatus)) {
-        //     this.#handleChallengeResponse(track);
-        //     return;
-        // }
+        if (inInitialChallengeStatus(this.challengeStatus)) {
+            this.#handleChallengeResponse(track);
+            return;
+        }
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
