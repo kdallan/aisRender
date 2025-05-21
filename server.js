@@ -65,8 +65,8 @@ class CallSession {
         this.lastCommandTime = null;
 
         this.audioBuffer = {
-            inbound: new FastBuffer(16384),
-            outbound: new FastBuffer(16384),
+            inbound: new FastBuffer(2 * 1024),
+            outbound: new FastBuffer(2 * 1024),
         };
 
         this.processingStartTime = { inbound: 0, outbound: 0 };
