@@ -508,10 +508,10 @@ class CallSession {
         const history = this.transcriptHistory[track];
         history.push(transcript, isFinal);
 
-        if (inInitialChallengeStatus(this.challengeStatus)) {
-            this.#handleChallengeResponse(track);
-            return;
-        }
+        // if (inInitialChallengeStatus(this.challengeStatus)) {
+        //     this.#handleChallengeResponse(track);
+        //     return;
+        // }
 
         let hit = history.findScamPhrases();
         if (hit !== null) {
