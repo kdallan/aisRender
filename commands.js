@@ -351,21 +351,23 @@ async function playAudio(callSID, conferenceName, fileName) {
     }
 }
 
-async function callConnect(conferenceName, telephoneNumber) {
+async function callConnect(callSID, conferenceName, telephoneNumber, actor) {
     const verb = 'callConnect';
 
     // Validate inputs
-    if (!conferenceName || !telephoneNumber) {
-        const msg = `ConferenceName and telephoneNumber are required`;
+    if (!conferenceName || !telephoneNumber || !callSID | !actor) {
+        const msg = `Missing parameters`;
         log.error(`${verb}: ${msg}`);
         return { success: false, action: verb, message: msg };
     }
 
-    log.info(`${verb} "${conferenceName}" "${telephoneNumber}"`);
+    log.info(`${verb} "${callSID}" "${actor}" "${conferenceName}" "${telephoneNumber}"`);
 
-    const postData = `${POST_FIELDS.CONFERENCE_ID}=${encodeURIComponent(
-        conferenceName
-    )}&telephoneNumber=${telephoneNumber}`;
+    const postData = `${POST_FIELDS.CALL_SID}=${encodeURIComponent(callSID)}&${
+        POST_FIELDS.CONFERENCE_ID
+    }=${encodeURIComponent(conferenceName)}&telephoneNumber=${encodeURIComponent(
+        telephoneNumber
+    )}&actor=${encodeURIComponent(actor)}`;
 
     log.info(`POST data: ${postData}`);
 
@@ -375,15 +377,18 @@ async function callConnect(conferenceName, telephoneNumber) {
         return {
             success: true,
             action: verb,
-            message: `"${conferenceName}" "${telephoneNumber}"`,
+            message: `"${callSID}" "${conferenceName}" "${telephoneNumber}" "${actor}"`,
             data: response,
         };
     } catch (error) {
-        log.error(`Failed to ${verb}.conferenceName: ${conferenceName} filaName: ${telephoneNumber}`, error);
+        log.error(
+            `Failed to ${verb} callSID: ${callSID} conferenceName: ${conferenceName} fileName: ${telephoneNumber} actor: ${actor}`,
+            error
+        );
         return {
             success: false,
             action: verb,
-            message: `"${conferenceName}" "${telephoneNumber}" ${error.message}`,
+            message: `"${callSID}" "${conferenceName}" "${telephoneNumber}" "${actor}" ${error.message}`,
         };
     }
 }

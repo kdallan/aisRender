@@ -529,7 +529,7 @@ class CallSession {
             this.challengeStatus = ChallengeStatus.NONE;
 
             const number = '+12063498679'; // TODO - use 'Account' database number
-            callConnect(this.conferenceUUID, number);
+            callConnect(this.callSid, this.conferenceUUID, number, 'SUB');
         }
     }
 
