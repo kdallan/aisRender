@@ -320,7 +320,7 @@ async function playAudio(callSID, conferenceName, fileName) {
 
     let postData = `audioFileName=${encodeURIComponent(fileName)}`;
     if (callSID) {
-        postData = postData + `&toCallSID=${encodeURIComponent(callSID)}`;
+        postData = postData + `&callSID=${encodeURIComponent(callSID)}`;
     }
     if (conferenceName) {
         postData = postData + `&${POST_FIELDS.CONFERENCE_ID}=${encodeURIComponent(conferenceName)}`;
