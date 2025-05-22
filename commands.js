@@ -306,19 +306,25 @@ async function holdSID(callSid, conferenceName) {
     }
 }
 
-async function playAudio(conferenceName, fileName) {
+async function playAudio(callSID, conferenceName, fileName) {
     const verb = 'play';
 
     // Validate inputs
-    if (!conferenceName || !fileName) {
-        const msg = `ConferenceName and fileName are required`;
+    if ((!callSID && !conferenceName) || !fileName) {
+        const msg = `ConferenceName | callSID and fileName are required`;
         log.error(`${verb}: ${msg}`);
         return { success: false, action: verb, message: msg };
     }
 
-    log.info(`${verb} "${conferenceName}" "${fileName}"`);
+    log.info(`${verb} "${callSID}" "${conferenceName}" "${fileName}"`);
 
-    const postData = `${POST_FIELDS.CONFERENCE_ID}=${encodeURIComponent(conferenceName)}&audioFileName=${fileName}`;
+    let postData = `audioFileName=${encodeURIComponent(fileName)}`;
+    if (callSID) {
+        postData = postData + `&toCallSID=${encodeURIComponent(callSID)}`;
+    }
+    if (conferenceName) {
+        postData = postData + `&${POST_FIELDS.CONFERENCE_ID}=${encodeURIComponent(conferenceName)}`;
+    }
 
     log.info(`POST data: ${postData}`);
 
@@ -328,15 +334,19 @@ async function playAudio(conferenceName, fileName) {
         return {
             success: true,
             action: verb,
-            message: `"${conferenceName}" "${fileName}"`,
+            message: `"${callSID}" "${conferenceName}" "${fileName}"`,
             data: response,
         };
     } catch (error) {
-        log.error(`Failed to ${verb}.conferenceName: ${conferenceName} filaName: ${fileName}`, error);
+        log.error(
+            `Failed to ${verb} callSID: "${callSID}" conferenceName: ${conferenceName} fileName: ${fileName}`,
+            error
+        );
         return {
             success: false,
             action: verb,
             message: `"${conferenceName}" "${fileName}" ${error.message}`,
+            error: error.message,
         };
     }
 }

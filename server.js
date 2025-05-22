@@ -454,7 +454,7 @@ class CallSession {
                     // Fire off the challenge audio
                     if ('OPY' == this.actor) {
                         this.challengeStatus = ChallengeStatus.PLAYINGAUDIO;
-                        playAudio(this.conferenceUUID, 'sayChallengeCaller')
+                        playAudio(this.callSid, null, 'sayChallengeCaller')
                             .then((result) => {
                                 log.info(`[${this.actor}] playAudio result:`, result);
                             })
