@@ -16,8 +16,8 @@ const POST_FIELDS = {
 
 const API_CONFIG = {
     // hostname: 'createconference-2381.twil.io',
-    // hostname: 'aishield.ngrok.dev', // TESTING
-    hostname: 'callcontrol-v2-4405-dev.twil.io',
+    hostname: 'aishield.ngrok.dev', // TESTING
+    // hostname: 'callcontrol-v2-4405-dev.twil.io',
     timeout: 10000, // 10 seconds timeout
 };
 
