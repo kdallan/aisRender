@@ -726,14 +726,14 @@ class VoiceServer {
                 maxBackpressure: 1 * 1024 * 1024,
 
                 /* Handlers */
+                // eslint-disable-next-line no-unused-vars
                 open: (ws, req) => {
                     const sessionId = randomUUID();
 
                     ws.sessionId = sessionId; // Store sessionId on the ws object!
                     log.info(`New WebSocket connection established from ${sessionId}`);
 
-                    const origin = req.getHeader('origin');
-                    log.info( `origin: ${origin}`);
+                    console.log('Host header:', req.headers.host);
 
                     const session = new CallSession(sessionId);
                     this.sessions.set(sessionId, session);
