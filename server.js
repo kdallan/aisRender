@@ -476,9 +476,18 @@ class CallSession {
                                 console.log('=== STRINGIFIED ===', JSON.stringify(result));
                                 console.log('=== TYPE ===', typeof result);
 
-                                // log.info(`[${this.actor}] playAudio result:`, result);
+                                log.info(`[${this.actor}] playAudio result: ${result}`);
 
-                                const duration = result?.data?.audioDuration ?? 12;
+                                let duration = 12;
+                                const dataString = result.data; // Get the string from the 'data' property
+                                if (dataString && typeof dataString === 'string') {
+                                    try {
+                                        const dataObject = JSON.parse(dataString); // Parse the JSON string
+                                        duration = dataObject?.audioDuration ?? 12;
+                                    } catch (err) {
+                                        log.info( `error: ${err}`);
+                                    }
+                                }
 
                                 log.info(`Duration: "${duration}" seconds`);
 
@@ -717,13 +726,14 @@ class VoiceServer {
                 maxBackpressure: 1 * 1024 * 1024,
 
                 /* Handlers */
-
-                // eslint-disable-next-line no-unused-vars
                 open: (ws, req) => {
                     const sessionId = randomUUID();
 
                     ws.sessionId = sessionId; // Store sessionId on the ws object!
                     log.info(`New WebSocket connection established from ${sessionId}`);
+
+                    const origin = req.getHeader('origin');
+                    log.info( `origin: ${origin}`);
 
                     const session = new CallSession(sessionId);
                     this.sessions.set(sessionId, session);
