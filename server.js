@@ -203,6 +203,14 @@ class CallSession {
         this.metrics.deepgram.sendRates = { inbound: [], outbound: [] };
     }
 
+    #startChallengeTimer(lengthInMs) {
+        this.#stopChallengeTimer();
+        this.challengeStatus = ChallengeStatus.TIMEDRESPONSE;
+        this.challengeTimer = setTimeout(() => {
+            this.#challengeTimedOut();
+        }, lengthInMs);
+    }
+
     #stopChallengeTimer() {
         if (this.challengeTimer) {
             clearTimeout(this.challengeTimer);
@@ -403,10 +411,9 @@ class CallSession {
     // Ok, this is just handling the audioFinished event for now. TODO: make the event body JSON
     // eslint-disable-next-line no-unused-vars
     handlePUTEvent(event, audioId) {
-        this.challengeStatus = ChallengeStatus.TIMEDRESPONSE;
-        this.challengeTimer = setTimeout(() => {
-            this.#challengeTimedOut();
-        }, CHALLENGE_TIMEOUT);
+        if (this.challengeStatus === ChallengeStatus.PLAYINGAUDIO) {
+            this.#startChallengeTimer(CHALLENGE_TIMEOUT);
+        }
     }
 
     // eslint-disable-next-line no-unused-vars
@@ -465,7 +472,7 @@ class CallSession {
                         this.challengeStatus = ChallengeStatus.PLAYINGAUDIO;
                         playAudio(this.callSid, null, 'sayChallengeCaller', this.sessionId)
                             .then((result) => {
-                                log.info(`[${this.actor}] playAudio result:`, result);
+                                log.info(`[${this.actor}] playAudio result:`, JSON.stringify(result, null, 2));
                             })
                             .catch((error) => {
                                 log.error(`[${this.actor}] handleTranscript: error:`, error);
@@ -659,8 +666,9 @@ class VoiceServer {
 
         this.app = uWS
             .App()
-            // Webhook endpoint for external events
+            // Webhook endpoint for external events (only audioFinished for now)
             .put('/callStatus', (res, req) => {
+                log.info(`PUT callStatus`);
                 // Parse the raw query string: "action=audioPlayDone&audioId=xxxxxx&sessionId=yyyyyy"
                 const rawQuery = req.getQuery();
                 const params = new URLSearchParams(rawQuery);
