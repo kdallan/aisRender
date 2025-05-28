@@ -472,7 +472,11 @@ class CallSession {
                         this.challengeStatus = ChallengeStatus.PLAYINGAUDIO;
                         playAudio(this.callSid, null, 'sayChallengeCaller', this.sessionId)
                             .then((result) => {
-                                log.info(`[${this.actor}] audioPlay result:`, JSON.stringify(result.data, null, 2));
+                                console.log('=== RAW CONSOLE LOG ===', result);
+                                console.log('=== STRINGIFIED ===', JSON.stringify(result));
+                                console.log('=== TYPE ===', typeof result);
+
+                                log.info(`[${this.actor}] playAudio result:`, result);
                             })
                             .catch((error) => {
                                 log.error(`[${this.actor}] handleTranscript: error:`, error);

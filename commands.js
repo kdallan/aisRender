@@ -154,6 +154,9 @@ async function addGuardian(phoneNumber, conferenceName) {
     try {
         const options = createPOSTOptions('addGuardian', postData);
         const response = await sendPOSTrequest(options, postData);
+
+        log.info('response: ', JSON.stringify(response));
+
         return {
             success: true,
             remove: true,
