@@ -306,19 +306,54 @@ async function holdSID(callSid, conferenceName) {
     }
 }
 
-async function playAudio(callSID, conferenceName, fileName) {
-    const verb = 'play';
+async function stopAudio(callSID) {
+    const verb = 'audioStop';
 
-    // Validate inputs
-    if ((!callSID && !conferenceName) || !fileName) {
-        const msg = `ConferenceName | callSID and fileName are required`;
+    if (!callSID) {
+        const msg = `callSID is required`;
         log.error(`${verb}: ${msg}`);
         return { success: false, action: verb, message: msg };
     }
 
-    log.info(`${verb} "${callSID}" "${conferenceName}" "${fileName}"`);
+    log.info(`${verb} "${callSID}"`);
 
-    let postData = `audioFileName=${encodeURIComponent(fileName)}`;
+    let postData = `&callSID=${encodeURIComponent(callSID)}`;
+
+    log.info(`POST data: ${postData}`);
+
+    try {
+        const options = createPOSTOptions(verb, postData);
+        const response = await sendPOSTrequest(options, postData);
+        return {
+            success: true,
+            action: verb,
+            message: `"${callSID}"`,
+            data: response,
+        };
+    } catch (error) {
+        log.error(`Failed to ${verb} callSID: "${callSID}"`, error);
+        return {
+            success: false,
+            action: verb,
+            message: `"${callSID}" ${error.message}`,
+            error: error.message,
+        };
+    }
+}
+
+async function playAudio(callSID, conferenceName, fileName, sessionId) {
+    const verb = 'audioPlay';
+
+    // Validate inputs
+    if ((!callSID && !conferenceName) || !fileName || !sessionId) {
+        const msg = `ConferenceName | callSID and fileName and sessionId are required`;
+        log.error(`${verb}: ${msg}`);
+        return { success: false, action: verb, message: msg };
+    }
+
+    log.info(`${verb} "${callSID}" "${conferenceName}" "${fileName}" "${sessionId}"`);
+
+    let postData = `audioFileName=${encodeURIComponent(fileName)}&sessionId=${encodeURIComponent(sessionId)}`;
     if (callSID) {
         postData = postData + `&callSID=${encodeURIComponent(callSID)}`;
     }
@@ -329,23 +364,23 @@ async function playAudio(callSID, conferenceName, fileName) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions('play', postData);
+        const options = createPOSTOptions(verb, postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
             action: verb,
-            message: `"${callSID}" "${conferenceName}" "${fileName}"`,
+            message: `"${callSID}" "${conferenceName}" "${fileName}" "${sessionId}`,
             data: response,
         };
     } catch (error) {
         log.error(
-            `Failed to ${verb} callSID: "${callSID}" conferenceName: ${conferenceName} fileName: ${fileName}`,
+            `Failed to ${verb} callSID: "${callSID}" conferenceName: ${conferenceName} fileName: ${fileName} sessionId: ${sessionId}`,
             error
         );
         return {
             success: false,
             action: verb,
-            message: `"${conferenceName}" "${fileName}" ${error.message}`,
+            message: `"${callSID}" "${conferenceName}" "${fileName}" "${sessionId}" ${error.message}`,
             error: error.message,
         };
     }
@@ -632,5 +667,6 @@ module.exports = {
     handlePhrase,
     sayPhrase,
     playAudio,
+    stopAudio,
     callConnect,
 };

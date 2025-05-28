@@ -32,8 +32,7 @@ function inInitialChallengeStatus(status) {
     return status === ChallengeStatus.PLAYINGAUDIO || status === ChallengeStatus.TIMEDRESPONSE;
 }
 
-const CHALLENGE_AUDIO_LENGTH = 14 * 1000;
-const CHALLENGE_TIMEOUT = CHALLENGE_AUDIO_LENGTH + 5 * 1000;
+const CHALLENGE_TIMEOUT = 10 * 1000;
 
 // Helper function for simdjson lazyParse
 function getValueOrDefault(parsedDoc, path, defaultValue) {
@@ -87,7 +86,8 @@ function passedChallenge(sentence) {
 }
 
 class CallSession {
-    constructor() {
+    constructor(sessionId) {
+        this.sessionId = sessionId;
         this.callSid = null;
         this.conferenceUUID = '';
         this.active = true;
@@ -400,6 +400,15 @@ class CallSession {
         this.#startFlushTimer(track);
     }
 
+    // Ok, this is just handling the audioFinished event for now. TODO: make the event body JSON
+    // eslint-disable-next-line no-unused-vars
+    handlePUTEvent(event, audioId) {
+        this.challengeStatus = ChallengeStatus.TIMEDRESPONSE;
+        this.challengeTimer = setTimeout(() => {
+            this.#challengeTimedOut();
+        }, CHALLENGE_TIMEOUT);
+    }
+
     // eslint-disable-next-line no-unused-vars
     handleMessage(message, isBinary) {
         // PUBLIC METHOD
@@ -454,19 +463,14 @@ class CallSession {
                     // Fire off the challenge audio
                     if ('OPY' == this.actor) {
                         this.challengeStatus = ChallengeStatus.PLAYINGAUDIO;
-                        playAudio(this.callSid, null, 'sayChallengeCaller')
+                        playAudio(this.callSid, null, 'sayChallengeCaller', this.sessionId)
                             .then((result) => {
                                 log.info(`[${this.actor}] playAudio result:`, result);
                             })
                             .catch((error) => {
                                 log.error(`[${this.actor}] handleTranscript: error:`, error);
                             })
-                            .finally(() => {
-                                this.challengeStatus = ChallengeStatus.TIMEDRESPONSE;
-                                this.challengeTimer = setTimeout(() => {
-                                    this.#challengeTimedOut();
-                                }, CHALLENGE_TIMEOUT);
-                            });
+                            .finally(() => {});
                     }
 
                     break;
@@ -485,7 +489,7 @@ class CallSession {
         log.info(`[${this.actor}] Challenge timed out`);
         this.challengeStatus = ChallengeStatus.FAILED;
 
-        // TODO: Play challenge failed audio?
+        playAudio(this.callSid, null, 'sayExplainRejection', this.sessionId);
     }
 
     #processReturnedCommandJSON(result, track) {
@@ -524,12 +528,14 @@ class CallSession {
         const words = history.flatten(2);
 
         if (passedChallenge(words)) {
+            playAudio(this.callSid, null, 'sayConnectingCall', this.sessionId);
+
             log.info(`[${this.actor}] Challenge passed`);
             this.#stopChallengeTimer();
             this.challengeStatus = ChallengeStatus.NONE;
 
-            // const number = '+12063498679'; // TODO - use 'Account' database number
-            const number = '+16784852385'
+            const number = '+12063498679'; // TODO - use 'Account' database number
+            // const number = '+16784852385'; // Katy's number
             callConnect(this.callSid, this.conferenceUUID, number, 'SUB');
         }
     }
@@ -653,6 +659,38 @@ class VoiceServer {
 
         this.app = uWS
             .App()
+            // Webhook endpoint for external events
+            .put('/callStatus', (res, req) => {
+                // Parse the raw query string: "action=audioPlayDone&audioId=xxxxxx&sessionId=yyyyyy"
+                const rawQuery = req.getQuery();
+                const params = new URLSearchParams(rawQuery);
+
+                const action = params.get('action');
+                const audioId = params.get('audioId');
+                const sessionId = params.get('sessionId');
+
+                res.writeHeader('Content-Type', 'application/json');
+
+                // Validate presence of all three parameters
+                if (!action || !audioId || !sessionId) {
+                    res.writeStatus('400 Bad Request');
+                    return res.end(JSON.stringify({ error: 'Missing action, audioId, or sessionId in query string' }));
+                }
+
+                // Dispatch into your handler (you can look up the session by sessionId here)
+                log.info(`Webhook PUT received: sessionId=${sessionId}, action=${action}, audioId=${audioId}`);
+
+                const session = this.sessions.get(sessionId);
+                if (!session) {
+                    res.writeStatus('400 Bad Request');
+                    return res.end(JSON.stringify({ error: 'Invalid sessionId' }));
+                }
+
+                session.handlePUTEvent(action, audioId);
+
+                res.writeStatus('200 OK');
+                return res.end(JSON.stringify({ status: 'received' }));
+            })
             .ws('/*', {
                 /* Options */
                 compression: uWS.DISABLED,
@@ -669,7 +707,7 @@ class VoiceServer {
                     ws.sessionId = sessionId; // Store sessionId on the ws object!
                     log.info(`New WebSocket connection established from ${sessionId}`);
 
-                    const session = new CallSession();
+                    const session = new CallSession(sessionId);
                     this.sessions.set(sessionId, session);
                 },
                 message: (ws, message, isBinary) => {
