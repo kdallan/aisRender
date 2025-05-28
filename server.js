@@ -485,7 +485,7 @@ class CallSession {
                                         const dataObject = JSON.parse(dataString); // Parse the JSON string
                                         duration = dataObject?.audioDuration ?? 12;
                                     } catch (err) {
-                                        log.info( `error: ${err}`);
+                                        log.info(`error: ${err}`);
                                     }
                                 }
 
@@ -726,6 +726,23 @@ class VoiceServer {
                 maxBackpressure: 1 * 1024 * 1024,
 
                 /* Handlers */
+                upgrade: (res, req, context) => {
+                    // Safely pull whatever headers you need:
+                    const hostHeader = req.getHeader('host') || ''; // "example.com:443"
+
+                    log.info( `host: ${hostHeader}`);
+
+                    const authToken = req.getHeader('authorization'); // maybe you have one
+
+                    // Pass them through to the WebSocket user-data bucket:
+                    res.upgrade(
+                        { hostHeader, authToken },
+                        req.getHeader('sec-websocket-key'),
+                        req.getHeader('sec-websocket-protocol'),
+                        req.getHeader('sec-websocket-extensions'),
+                        context
+                    );
+                },
                 // eslint-disable-next-line no-unused-vars
                 open: (ws, req) => {
                     const sessionId = randomUUID();
