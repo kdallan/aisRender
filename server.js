@@ -478,11 +478,11 @@ class CallSession {
 
                                 // log.info(`[${this.actor}] playAudio result:`, result);
 
-                                const DURATION = result?.data?.audioDuration ?? 12;
+                                const duration = result?.data?.audioDuration ?? 12;
 
-                                log.info('Duration: ', DURATION);
+                                log.info(`Duration: "${duration}" seconds`);
 
-                                this.#startChallengeTimer(DURATION * 1000 + CHALLENGE_TIMEOUT);
+                                this.#startChallengeTimer(duration * 1000 + CHALLENGE_TIMEOUT);
                             })
                             .catch((error) => {
                                 log.error(`[${this.actor}] handleTranscript: error:`, error);
