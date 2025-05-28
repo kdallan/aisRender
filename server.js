@@ -733,8 +733,6 @@ class VoiceServer {
                     ws.sessionId = sessionId; // Store sessionId on the ws object!
                     log.info(`New WebSocket connection established from ${sessionId}`);
 
-                    console.log('Host header:', req.headers.host);
-
                     const session = new CallSession(sessionId);
                     this.sessions.set(sessionId, session);
                 },
