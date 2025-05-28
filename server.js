@@ -476,7 +476,13 @@ class CallSession {
                                 console.log('=== STRINGIFIED ===', JSON.stringify(result));
                                 console.log('=== TYPE ===', typeof result);
 
-                                log.info(`[${this.actor}] playAudio result:`, result);
+                                // log.info(`[${this.actor}] playAudio result:`, result);
+
+                                const DURATION = result?.data?.audioDuration ?? 12;
+
+                                log.info('Duration: ', DURATION);
+
+                                this.#startChallengeTimer(DURATION * 1000 + CHALLENGE_TIMEOUT);
                             })
                             .catch((error) => {
                                 log.error(`[${this.actor}] handleTranscript: error:`, error);
