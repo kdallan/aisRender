@@ -729,8 +729,10 @@ class VoiceServer {
                 upgrade: (res, req, context) => {
                     // Safely pull whatever headers you need:
                     const hostHeader = req.getHeader('host') || ''; // "example.com:443"
+                    const originHeader = req.getHeader('Origin') || '';
 
                     log.info( `host: ${hostHeader}`);
+                    log.info( `origin: ${originHeader}`);
 
                     const authToken = req.getHeader('authorization'); // maybe you have one
 
@@ -743,8 +745,7 @@ class VoiceServer {
                         context
                     );
                 },
-                // eslint-disable-next-line no-unused-vars
-                open: (ws, req) => {
+                open: (ws) => {
                     const sessionId = randomUUID();
 
                     ws.sessionId = sessionId; // Store sessionId on the ws object!
