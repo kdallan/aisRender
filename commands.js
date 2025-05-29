@@ -44,11 +44,11 @@ const GUARDIAN_COMMANDS = {
  * @param {string} postData - URL encoded post data
  * @returns {Object} HTTP request options
  */
-function createPOSTOptions(restFunction, postData) {
+function createPOSTOptions(origin, restFunction, postData) {
     const credentials = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
 
     return {
-        hostname: API_CONFIG.hostname,
+        hostname: origin,
         path: '/' + restFunction,
         method: 'POST',
         timeout: API_CONFIG.timeout,
@@ -127,7 +127,7 @@ function isValidCallSid(callSid) {
  * @param {string} conferenceName - Conference name
  * @returns {Promise<Object>} Result of the operation
  */
-async function addGuardian(phoneNumber, conferenceName) {
+async function addGuardian(origin, phoneNumber, conferenceName) {
     const verb = 'addGuardian';
 
     // Validate inputs
@@ -152,7 +152,7 @@ async function addGuardian(phoneNumber, conferenceName) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions('addGuardian', postData);
+        const options = createPOSTOptions(origin, 'addGuardian', postData);
         const response = await sendPOSTrequest(options, postData);
 
         log.info('response: ', JSON.stringify(response));
@@ -180,7 +180,7 @@ async function addGuardian(phoneNumber, conferenceName) {
  * @param {string} conferenceName - Conference name
  * @returns {Promise<Object>} Result of the operation
  */
-async function talkToSID(callSid, conferenceName) {
+async function talkToSID(origin, callSid, conferenceName) {
     const verb = 'talkToSID';
 
     // Validate inputs
@@ -205,7 +205,7 @@ async function talkToSID(callSid, conferenceName) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions('guardian/talkToSID', postData);
+        const options = createPOSTOptions(origin, 'guardian/talkToSID', postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
@@ -223,7 +223,7 @@ async function talkToSID(callSid, conferenceName) {
     }
 }
 
-async function hangupSID(callSid, conferenceName) {
+async function hangupSID(origin, callSid, conferenceName) {
     const verb = 'hangupSID';
 
     // Validate inputs
@@ -248,7 +248,7 @@ async function hangupSID(callSid, conferenceName) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions('guardian/hangupSID', postData);
+        const options = createPOSTOptions(origin, 'guardian/hangupSID', postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
@@ -266,7 +266,7 @@ async function hangupSID(callSid, conferenceName) {
     }
 }
 
-async function holdSID(callSid, conferenceName) {
+async function holdSID(origin, callSid, conferenceName) {
     const verb = 'holdSID';
 
     // Validate inputs
@@ -291,7 +291,7 @@ async function holdSID(callSid, conferenceName) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions('guardian/holdSID', postData);
+        const options = createPOSTOptions(origin, 'guardian/holdSID', postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
@@ -309,7 +309,7 @@ async function holdSID(callSid, conferenceName) {
     }
 }
 
-async function stopAudio(callSID) {
+async function stopAudio(origin, callSID) {
     const verb = 'audioStop';
 
     if (!callSID) {
@@ -325,7 +325,7 @@ async function stopAudio(callSID) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions(verb, postData);
+        const options = createPOSTOptions(origin, verb, postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
@@ -344,7 +344,7 @@ async function stopAudio(callSID) {
     }
 }
 
-async function playAudio(callSID, conferenceName, fileName, sessionId) {
+async function playAudio(origin, callSID, conferenceName, fileName, sessionId) {
     const verb = 'audioPlay';
 
     // Validate inputs
@@ -367,7 +367,7 @@ async function playAudio(callSID, conferenceName, fileName, sessionId) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions(verb, postData);
+        const options = createPOSTOptions(origin, verb, postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
@@ -389,7 +389,7 @@ async function playAudio(callSID, conferenceName, fileName, sessionId) {
     }
 }
 
-async function callConnect(callSID, conferenceName, telephoneNumber, actor) {
+async function callConnect(origin, callSID, conferenceName, telephoneNumber, actor) {
     const verb = 'callConnect';
 
     // Validate inputs
@@ -410,7 +410,7 @@ async function callConnect(callSID, conferenceName, telephoneNumber, actor) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions(verb, postData);
+        const options = createPOSTOptions(origin, verb, postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
@@ -431,28 +431,28 @@ async function callConnect(callSID, conferenceName, telephoneNumber, actor) {
     }
 }
 
-async function talkToActor(actor, conferenceName) {
+async function talkToActor(origin, actor, conferenceName) {
     const actorSid = await sidDatabase.get(conferenceName, actor);
     if (actorSid) {
-        return talkToSID(actorSid, conferenceName);
+        return talkToSID(origin, actorSid, conferenceName);
     }
 
     log.error(`Failed to talk to actor. No ${actor} SID found for conference: ${conferenceName}`);
 }
 
-async function hangupActor(actor, conferenceName) {
+async function hangupActor(origin, actor, conferenceName) {
     const actorSid = await sidDatabase.get(conferenceName, actor);
     if (actorSid) {
-        return hangupSID(actorSid, conferenceName);
+        return hangupSID(origin, actorSid, conferenceName);
     }
 
     log.error(`Failed to hangup actor. No ${actor} SID found for conference: ${conferenceName}`);
 }
 
-async function holdActor(actor, conferenceName) {
+async function holdActor(origin, actor, conferenceName) {
     const actorSid = await sidDatabase.get(conferenceName, actor);
     if (actorSid) {
-        return holdSID(actorSid, conferenceName);
+        return holdSID(origin, actorSid, conferenceName);
     }
 
     log.error(`Failed to hold actor. No ${actor} SID found for conference: ${conferenceName}`);
@@ -465,7 +465,7 @@ async function holdActor(actor, conferenceName) {
  * @param {string} conferenceName - Conference name
  * @returns {Promise<Object>} Result of the operation
  */
-async function guardianCommand(verb, postName, conferenceName) {
+async function guardianCommand(origin, verb, postName, conferenceName) {
     if (!conferenceName) {
         const msg = `Conference name is required`;
         log.error(`${verb}: ${msg}`);
@@ -479,7 +479,7 @@ async function guardianCommand(verb, postName, conferenceName) {
     log.info(`POST data: ${postData}`);
 
     try {
-        const options = createPOSTOptions(postName, postData);
+        const options = createPOSTOptions(origin, postName, postData);
         const response = await sendPOSTrequest(options, postData);
         return {
             success: true,
@@ -586,7 +586,7 @@ function getGuardianPhoneNumber() {
  * @param {string} conferenceName - Conference name
  * @returns {Promise<Object>} Result of the operation
  */
-async function handlePhrase(phrase, track, callSid, conferenceName) {
+async function handlePhrase(origin, phrase, track, callSid, conferenceName) {
     log.info(`handlePhrase: ${JSON.stringify(phrase)}`);
 
     const verb = 'handlePhrase';
@@ -606,31 +606,31 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
             switch (cmd) {
                 case SUB_COMMANDS.ADD_GUARDIAN: {
                     const guardianPhone = getGuardianPhoneNumber();
-                    return await addGuardian(guardianPhone, conferenceName);
+                    return await addGuardian(origin, guardianPhone, conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.HOLD_SUB: {
-                    return await holdActor('SUB', conferenceName);
+                    return await holdActor(origin, 'SUB', conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.HOLD_OPY: {
-                    return await holdActor('OPY', conferenceName);
+                    return await holdActor(origin, 'OPY', conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.TALK_TO_SUB: {
-                    return await talkToActor('SUB', conferenceName);
+                    return await talkToActor(origin, 'SUB', conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.TALK_TO_OPY: {
-                    return await talkToActor('OPY', conferenceName);
+                    return await talkToActor(origin, 'OPY', conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.HANGUP_SUB: {
-                    return await hangupActor('SUB', conferenceName);
+                    return await hangupActor(origin, 'SUB', conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.HANGUP_OPY: {
-                    return await hangupActor('OPY', conferenceName);
+                    return await hangupActor(origin, 'OPY', conferenceName);
                 }
 
                 case GUARDIAN_COMMANDS.TALK_TO_ALL:
@@ -638,7 +638,7 @@ async function handlePhrase(phrase, track, callSid, conferenceName) {
                 case GUARDIAN_COMMANDS.DROP_OFF_CALL:
                 case GUARDIAN_COMMANDS.MONITOR_CALL: {
                     const postName = 'guardian/' + cmd;
-                    return await guardianCommand(cmd, postName, conferenceName);
+                    return await guardianCommand(origin, cmd, postName, conferenceName);
                 }
 
                 default: {

@@ -21,6 +21,8 @@ const TRACK_INBOUND = 'inbound';
 const TRACK_OUTBOUND = 'outbound';
 const INITIAL_THROTTLE_INTERVAL = 20;
 
+const DEFAULT_POST_ENDPOINT = 'callcontrol-v2-4405-dev.twil.io';
+
 const ChallengeStatus = Object.freeze({
     NONE: 0,
     PLAYINGAUDIO: 1,
@@ -461,6 +463,7 @@ class CallSession {
                     log.info(`  Conference name: ${this.conferenceUUID}`);
                     this.actor = getValueOrDefault(data, 'start.customParameters.actor', ''); // Optional: 'SUB', 'OPY', 'GDN'
                     log.info(`  Actor: ${this.actor}`);
+                    this.origin = getValueOrDefault(data, 'start.customParameters.origin', DEFAULT_POST_ENDPOINT);
                     this.guardianSID = ''; // Get this from 'addGuardian' event. If actor is 'GDN', callSID is the guardianSID
                     this.challengeStatus = ChallengeStatus.NONE;
                     this.challengeTimer = null;
@@ -470,15 +473,11 @@ class CallSession {
                     // Fire off the challenge audio
                     if ('OPY' == this.actor) {
                         this.challengeStatus = ChallengeStatus.PLAYINGAUDIO;
-                        playAudio(this.callSid, null, 'sayChallengeCaller', this.sessionId)
+                        playAudio(this.origin, this.callSid, null, 'sayChallengeCaller', this.sessionId)
                             .then((result) => {
-                                console.log('=== RAW CONSOLE LOG ===', result);
-                                console.log('=== STRINGIFIED ===', JSON.stringify(result));
-                                console.log('=== TYPE ===', typeof result);
-
                                 log.info(`[${this.actor}] playAudio result: ${result}`);
 
-                                let duration = 12;
+                                let duration = 12; // Default
                                 const dataString = result.data; // Get the string from the 'data' property
                                 if (dataString && typeof dataString === 'string') {
                                     try {
@@ -515,7 +514,7 @@ class CallSession {
         log.info(`[${this.actor}] Challenge timed out`);
         this.challengeStatus = ChallengeStatus.FAILED;
 
-        playAudio(this.callSid, null, 'sayExplainRejection', this.sessionId);
+        playAudio(this.origin, this.callSid, null, 'sayExplainRejection', this.sessionId);
     }
 
     #processReturnedCommandJSON(result, track) {
@@ -554,7 +553,7 @@ class CallSession {
         const words = history.flatten(2);
 
         if (passedChallenge(words)) {
-            playAudio(this.callSid, null, 'sayConnectingCall', this.sessionId);
+            playAudio(this.origin, this.callSid, null, 'sayConnectingCall', this.sessionId);
 
             log.info(`[${this.actor}] Challenge passed`);
             this.#stopChallengeTimer();
@@ -562,7 +561,7 @@ class CallSession {
 
             const number = '+12063498679'; // TODO - use 'Account' database number
             // const number = '+16784852385'; // Katy's number
-            callConnect(this.callSid, this.conferenceUUID, number, 'SUB');
+            callConnect(this.origin, this.callSid, this.conferenceUUID, number, 'SUB');
         }
     }
 
@@ -599,7 +598,7 @@ class CallSession {
             this.lastCommandTime = now;
             log.info(`[${this.actor}] handleTranscript: : timestamping command`);
 
-            handlePhrase(hit, track, this.callSid, this.conferenceUUID)
+            handlePhrase(this.origin, hit, track, this.callSid, this.conferenceUUID)
                 .then((result) => {
                     log.info(`[${this.actor}] handleTranscript: result:`, result);
                     this.#processReturnedCommandJSON(result, track);
@@ -731,8 +730,8 @@ class VoiceServer {
                     const hostHeader = req.getHeader('host') || ''; // "example.com:443"
                     const originHeader = req.getHeader('Origin') || '';
 
-                    log.info( `host: ${hostHeader}`);
-                    log.info( `origin: ${originHeader}`);
+                    log.info(`host: ${hostHeader}`);
+                    log.info(`origin: ${originHeader}`);
 
                     const authToken = req.getHeader('authorization'); // maybe you have one
 
