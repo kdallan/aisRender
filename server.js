@@ -464,6 +464,7 @@ class CallSession {
                     this.actor = getValueOrDefault(data, 'start.customParameters.actor', ''); // Optional: 'SUB', 'OPY', 'GDN'
                     log.info(`  Actor: ${this.actor}`);
                     this.origin = getValueOrDefault(data, 'start.customParameters.origin', DEFAULT_POST_ENDPOINT);
+                    log.info(`  Origin: ${this.origin}`);
                     this.guardianSID = ''; // Get this from 'addGuardian' event. If actor is 'GDN', callSID is the guardianSID
                     this.challengeStatus = ChallengeStatus.NONE;
                     this.challengeTimer = null;
@@ -728,10 +729,8 @@ class VoiceServer {
                 upgrade: (res, req, context) => {
                     // Safely pull whatever headers you need:
                     const hostHeader = req.getHeader('host') || ''; // "example.com:443"
-                    const originHeader = req.getHeader('Origin') || '';
 
                     log.info(`host: ${hostHeader}`);
-                    log.info(`origin: ${originHeader}`);
 
                     const authToken = req.getHeader('authorization'); // maybe you have one
 
